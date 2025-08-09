@@ -41,7 +41,7 @@ def getDistinctColors(n):
 class Grid_Map:
     def __init__(self):
         # pg.init()
-        pg.display.set_caption("Coverage")
+        pg.display.set_caption("ε⋆+ Coverage Path Planning")
         self.WIN = None
         self.grid_surface = None
 
@@ -50,11 +50,11 @@ class Grid_Map:
         self.row_count = 0
         self.col_count = 0
 
+        # ✅ FIXED: Battery position will be set by user interaction
         self.battery_pos = (0, 0)
         self.vehicle_pos = (0, 0)
 
         self.battery_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
-        # self.vehicle_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, BORDER)
 
         self.trajectories = [[(0, 0)]]  # list of trajectories (currently only coverage path)
 
@@ -62,9 +62,10 @@ class Grid_Map:
         self.charge_path_plan = []  # share between retreat & advance
 
         self.info_bar = None
-        self.energy_display = 0  # ✅ FIXED: Initialize energy display
+        self.energy_display = 0
 
     def read_map(self, filepath):
+        """Read map file và return environment + default battery position"""
         with open(filepath, "r", encoding="utf-8") as f:
             self.col_count, self.row_count = [int(i) for i in f.readline().strip().split()]
 
@@ -86,19 +87,23 @@ class Grid_Map:
             # ✅ FIXED: Always convert to numpy array immediately
             self.map = np.array(map_list, dtype=object)
 
+        # ✅ NOTE: This returns DEFAULT battery_pos, will be updated in edit_map()
         return copy.deepcopy(map_list), self.battery_pos
 
     def edit_map(self):
         """
-        🔧 RESTORED: Interactive map editing
+        🔧 FIXED: Interactive map editing với proper battery position return
         Left click: Place/remove obstacles
         Right click: Set charging station
         Any key: Start algorithm
+
+        Returns: (final_environment, final_battery_position)
         """
         print("\n🎮 INTERACTIVE SETUP MODE:")
         print("• Left click: Place/remove obstacles")
-        print("• Right click: Set charging station")
+        print("• Right click: Set charging station (IMPORTANT!)")
         print("• Press any key when ready to start algorithm")
+        print("\n⚠️  MUST set charging station before starting!")
 
         # ✅ FIXED: Initialize with proper numpy array if not exists
         if self.map is None:
@@ -107,6 +112,7 @@ class Grid_Map:
         done = False
         draw_obstacle = False
         prev_cell = None
+        battery_set = False  # Track if battery position was set
 
         while done == False:
             pos = pg.mouse.get_pos()
@@ -117,19 +123,30 @@ class Grid_Map:
                 if event.type == pg.QUIT:
                     done = True
                 elif event.type == pg.KEYDOWN:
+                    if not battery_set:
+                        print("⚠️  WARNING: No charging station set! Using default (0,0)")
+                        print("   Please set charging station with RIGHT CLICK first!")
+                        continue
                     done = True  # ✅ Start algorithm on any keypress
                 elif event.type == pg.MOUSEBUTTONDOWN:
                     mouse_pressed = pg.mouse.get_pressed()
                     if mouse_pressed[0]:  # left mouse click: obstacle
                         draw_obstacle = True
                     if mouse_pressed[2]:  # right mouse click: charging station
-                        if self.check_valid_pos((row, col)) == False: continue
+                        if self.check_valid_pos((row, col)) == False:
+                            continue
+
+                        # ✅ FIXED: Update battery position properly
                         self.update_battery_pos((row, col))
                         self.trajectories[0] = [(row, col)]
+
+                        # Clear any obstacle at this position
                         if isinstance(self.map, np.ndarray):
                             self.map[row, col] = 0
                         else:
                             self.map[row][col] = 0
+
+                        battery_set = True
                         print(f"🔋 Charging station set at: ({row}, {col})")
 
                 elif event.type == pg.MOUSEBUTTONUP:
@@ -138,7 +155,8 @@ class Grid_Map:
 
             # check boolean flag to allow holding left click to draw
             if draw_obstacle:
-                if self.check_valid_pos((row, col)) == False: continue
+                if self.check_valid_pos((row, col)) == False:
+                    continue
                 if (prev_cell != (row, col)):
                     prev_cell = (row, col)
                     current_val = self.map[row, col] if isinstance(self.map, np.ndarray) else self.map[row][col]
@@ -156,6 +174,18 @@ class Grid_Map:
             # pygame draw
             self.draw_map()
             pg.draw.rect(self.WIN, YELLOW, self.battery_img)
+
+            # Show status
+            if battery_set:
+                status_text = f"Battery: {self.battery_pos} - Press any key to start"
+                color = GREEN
+            else:
+                status_text = "Right-click to set charging station"
+                color = RED
+
+            text_surface = font.render(status_text, True, color)
+            self.WIN.blit(text_surface, (10, self.info_bar.y + 5))
+
             pg.display.flip()
 
         # ✅ FIXED: Always ensure numpy array at the end
@@ -163,6 +193,8 @@ class Grid_Map:
             self.map = np.array(self.map, dtype=object)
 
         print(f"✅ Setup complete! Charging station: {self.battery_pos}")
+
+        # ✅ FIXED: Return BOTH environment AND updated battery position
         return copy.deepcopy(self.map.tolist()), self.battery_pos
 
     def save_map(self, output_file):
@@ -305,9 +337,11 @@ class Grid_Map:
             pg.draw.lines(self.WIN, color, False, point_list, width=2)
 
     def update_battery_pos(self, pos):
+        """✅ FIXED: Update battery position and UI"""
         self.battery_pos = pos
         self.battery_img.x = EPSILON * pos[1] + BORDER
         self.battery_img.y = EPSILON * pos[0] + BORDER
+        print(f"🔋 Battery position updated to: {pos}")
 
     def update_vehicle_pos(self, pos):
         self.vehicle_pos = pos
@@ -379,85 +413,3 @@ class Grid_Map:
         if row < 0 or row >= self.row_count: return False
         if col < 0 or col >= self.col_count: return False
         return True
-
-
-def main():
-    """
-    🧪 TEST GRID MAP FUNCTIONALITY
-    Test loading Denmark map và interactive setup
-    """
-    print("🧪 Testing Grid_Map functionality...")
-
-    ui = Grid_Map()
-
-    # Test 1: Load Denmark map
-    denmark_path = 'map/real_map/denmark.txt'
-
-    if not os.path.exists(denmark_path):
-        print(f"❌ Denmark map not found: {denmark_path}")
-        print("📁 Current working directory:", os.getcwd())
-        print("📂 Available files in current directory:")
-        try:
-            for file in os.listdir('.'):
-                print(f"   - {file}")
-        except:
-            pass
-
-        # Create a simple test map
-        print("🔧 Creating test map...")
-        test_env = []
-        for i in range(20):
-            row = []
-            for j in range(20):
-                if i == 0 or i == 19 or j == 0 or j == 19:  # Borders
-                    row.append(1)
-                elif i == 10 and 5 <= j <= 14:  # Horizontal wall
-                    row.append(1)
-                else:
-                    row.append(0)
-            test_env.append(row)
-
-        # Setup UI for test map
-        ui.row_count = 20
-        ui.col_count = 20
-        ui.map = np.array(test_env, dtype=object)
-
-        # Initialize display
-        import pygame as pg
-        display_size = [8 * ui.col_count + 1, 8 * ui.row_count + 30]
-        ui.WIN = pg.display.set_mode(display_size)
-        ui.grid_surface = pg.Surface((8 * ui.col_count + 1, 8 * ui.row_count))
-        ui.info_bar = pg.Rect(0, 8 * ui.row_count + 1, 8 * ui.col_count, 30)
-
-        print("✅ Test map created successfully")
-
-    else:
-        try:
-            environment, battery_pos = ui.read_map(denmark_path)
-            print(f"✅ Denmark map loaded successfully")
-            print(f"📏 Dimensions: {len(environment)} x {len(environment[0])}")
-            print(f"🔋 Battery position: {battery_pos}")
-            print(f"📊 Sample data: {environment[0][:10]}")
-
-        except Exception as e:
-            print(f"❌ Failed to load Denmark map: {e}")
-            return
-
-    # Test 2: Interactive setup
-    print("\n🎮 Starting interactive setup test...")
-    try:
-        final_env, final_battery = ui.edit_map()
-        print(f"✅ Interactive setup completed")
-        print(f"🔋 Final battery position: {final_battery}")
-
-    except Exception as e:
-        print(f"❌ Interactive setup failed: {e}")
-
-    pg.quit()
-    print("🏁 Grid_Map test completed")
-
-
-if __name__ == "__main__":
-    import os
-
-    main()

@@ -1,7 +1,6 @@
 """
-epsilon_star/robot.py
-Main Robot Class với Energy Constraints
-ε⋆+ Algorithm implementation
+epsilon_star/robot.py - FIXED VERSION
+Main Robot Class với PROPER obstacle avoidance
 """
 
 import math
@@ -12,23 +11,42 @@ from .etm import ExploratoryTuringMachine
 
 
 class VisibilityGraph:
-    """Visibility graph for A* pathfinding"""
+    """FIXED Visibility graph for A* pathfinding với proper obstacle handling"""
 
     def __init__(self, environment: Dict[Tuple[int, int], str]):
         self.environment = environment
 
     def neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighbors for A* search"""
+        """
+        ✅ FIXED: Get valid neighbors for A* search với proper obstacle checking
+        """
         neighbors = []
         directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
         for dr, dc in directions:
             new_pos = (pos[0] + dr, pos[1] + dc)
-            if (new_pos in self.environment and
-                    self.environment[new_pos] not in ('o', 'obstacle')):
-                neighbors.append(new_pos)
+            if new_pos in self.environment:
+                cell_value = self.environment[new_pos]
+                # ✅ FIXED: Proper obstacle checking - handle both string and int
+                if not self._is_obstacle_cell(cell_value):
+                    neighbors.append(new_pos)
 
         return neighbors
+
+    def _is_obstacle_cell(self, cell_value) -> bool:
+        """
+        ✅ CRITICAL: Check if cell is obstacle
+        Handle various obstacle representations
+        """
+        # Handle string representations
+        if isinstance(cell_value, str):
+            return cell_value in ('o', 'obstacle', '1')
+
+        # Handle numeric representations
+        if isinstance(cell_value, (int, float)):
+            return cell_value == 1
+
+        return False
 
     def weight(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
         """Edge weight (Euclidean distance)"""
@@ -71,8 +89,7 @@ def a_star_search(graph: VisibilityGraph, start: Tuple[int, int],
 
 class EpsilonStarPlusRobot:
     """
-    ε⋆+ Algorithm Robot
-    Main class integrating ETM với energy constraints
+    ✅ FIXED ε⋆+ Algorithm Robot với proper obstacle avoidance
     """
 
     def __init__(self, battery_pos: Position, rows: int, cols: int,
@@ -86,8 +103,9 @@ class EpsilonStarPlusRobot:
         self.battery_pos = battery_pos
         self.energy = self.energy_config.capacity
 
-        # Environment for pathfinding
+        # ✅ FIXED: Environment for pathfinding với proper obstacle tracking
         self.environment = {}
+        self.environment_array = None
 
         # Statistics
         self.stats = {
@@ -103,18 +121,32 @@ class EpsilonStarPlusRobot:
         self.current_segment = SegmentType.COVERAGE
 
     def set_environment(self, environment_array):
-        """Set environment from array (1=obstacle, 0=free)"""
+        """
+        ✅ FIXED: Set environment from array with PROPER obstacle handling
+        """
+        self.environment_array = environment_array
         self.etm.set_environment(environment_array)
 
-        # Create environment dict for A*
+        # ✅ FIXED: Create environment dict for A* với proper obstacle marking
         self.environment = {}
+        obstacle_count = 0
+
         for row in range(len(environment_array)):
             for col in range(len(environment_array[0])):
                 pos_tuple = (row, col)
-                if environment_array[row, col] == 0:
-                    self.environment[pos_tuple] = 'u'  # unvisited
-                else:
+                cell_value = environment_array[row, col]
+
+                # ✅ CRITICAL: Handle both 1 and '1' as obstacles
+                if cell_value == 1 or cell_value == '1':
                     self.environment[pos_tuple] = 'o'  # obstacle
+                    obstacle_count += 1
+                else:
+                    self.environment[pos_tuple] = 'u'  # unvisited
+
+        total_cells = len(environment_array) * len(environment_array[0])
+        free_cells = total_cells - obstacle_count
+
+        print(f"🤖 Robot Environment loaded: {total_cells} total, {obstacle_count} obstacles, {free_cells} free")
 
     def run_step(self) -> Dict:
         """Execute one step of ε⋆+ algorithm"""
@@ -127,8 +159,19 @@ class EpsilonStarPlusRobot:
         if not waypoints:
             return {'status': 'no_waypoint', 'action': 'none'}
 
-        # Select best waypoint
+        # ✅ FIXED: Select best waypoint với obstacle validation
         selected_wp = self._select_waypoint(waypoints)
+
+        # ✅ CRITICAL: Validate waypoint is not obstacle before moving
+        if self._is_obstacle_position(selected_wp):
+            print(f"⚠️  WARNING: ETM suggested obstacle waypoint {selected_wp.tuple}! Searching alternative...")
+            alternative_wp = self._find_alternative_waypoint(waypoints)
+            if alternative_wp:
+                selected_wp = alternative_wp
+                print(f"✅ Found alternative waypoint: {selected_wp.tuple}")
+            else:
+                print(f"❌ No valid alternative waypoint found!")
+                return {'status': 'blocked', 'action': 'none'}
 
         if selected_wp == self.current_pos:
             # Task at current position
@@ -140,6 +183,25 @@ class EpsilonStarPlusRobot:
                     return self._execute_energy_cycle()
 
             return self._move_to(selected_wp)
+
+    def _is_obstacle_position(self, pos: Position) -> bool:
+        """
+        ✅ CRITICAL: Check if position is obstacle
+        This prevents robot from moving into walls!
+        """
+        pos_tuple = pos.tuple
+        if pos_tuple not in self.environment:
+            return True  # Out of bounds = obstacle
+
+        cell_value = self.environment[pos_tuple]
+        return cell_value in ('o', 'obstacle', '1') or cell_value == 1
+
+    def _find_alternative_waypoint(self, waypoints: List[Position]) -> Optional[Position]:
+        """Find non-obstacle waypoint from list"""
+        for wp in waypoints:
+            if not self._is_obstacle_position(wp):
+                return wp
+        return None
 
     def _check_energy_constraint(self, next_pos: Position) -> bool:
         """Energy constraint checking using A* on visibility graph"""
@@ -154,7 +216,8 @@ class EpsilonStarPlusRobot:
             total_needed = move_energy + retreat_energy
             return self.energy >= total_needed
 
-        except Exception:
+        except Exception as e:
+            print(f"⚠️  Energy constraint check failed: {e}")
             return False
 
     def _calculate_return_path(self, from_pos: Position) -> Tuple[List[Position], float]:
@@ -168,7 +231,8 @@ class EpsilonStarPlusRobot:
             path = [Position(row, col) for row, col in path_tuples]
             return path, distance
 
-        except Exception:
+        except Exception as e:
+            print(f"⚠️  A* pathfinding failed: {e}, using direct distance")
             # Fallback: direct distance
             direct_dist = from_pos.distance_to(self.battery_pos)
             return [from_pos, self.battery_pos], direct_dist
@@ -273,7 +337,8 @@ class EpsilonStarPlusRobot:
 
                     target_tuple = target.tuple
                     if (target_tuple in self.environment and
-                            self.environment[target_tuple] == 'u'):
+                            self.environment[target_tuple] == 'u' and
+                            not self._is_obstacle_position(target)):
                         return target
 
         return None
@@ -283,11 +348,30 @@ class EpsilonStarPlusRobot:
         if len(waypoints) == 1:
             return waypoints[0]
 
+        # ✅ FIXED: Filter out obstacles first
+        valid_waypoints = [wp for wp in waypoints if not self._is_obstacle_position(wp)]
+
+        if not valid_waypoints:
+            print(f"⚠️  WARNING: All waypoints are obstacles!")
+            return waypoints[0]  # Return first one anyway, will be caught later
+
         # Select waypoint with minimum distance
-        return min(waypoints, key=lambda wp: self.current_pos.distance_to(wp))
+        return min(valid_waypoints, key=lambda wp: self.current_pos.distance_to(wp))
 
     def _move_to(self, new_pos: Position) -> Dict:
-        """Move robot to new position with energy consumption"""
+        """
+        ✅ FIXED: Move robot to new position với obstacle validation
+        """
+        # ✅ CRITICAL: Final obstacle check before moving
+        if self._is_obstacle_position(new_pos):
+            print(f"🚫 BLOCKED: Cannot move to obstacle at {new_pos.tuple}")
+            return {
+                'status': 'blocked',
+                'action': 'blocked_move',
+                'position': new_pos.tuple,
+                'reason': 'obstacle'
+            }
+
         # Calculate and consume energy
         energy_cost = self._calculate_move_energy(new_pos)
 

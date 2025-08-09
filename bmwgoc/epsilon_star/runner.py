@@ -1,6 +1,6 @@
 """
 epsilon_star/runner.py - FIXED VERSION
-BWave Integration Runner cho ε⋆+ Algorithm với UI method calls được fix
+ε⋆+ Algorithm Runner với CORRECT Battery Position Initialization
 """
 
 import numpy as np
@@ -21,7 +21,8 @@ from .robot import EpsilonStarPlusRobot
 
 class EpsilonStarPlusRunner:
     """
-    Runner class để integrate ε⋆+ với BWave framework
+    FIXED Runner class để integrate ε⋆+ với BWave framework
+    ✅ Correct battery position initialization from user interaction
     """
 
     def __init__(self, map_file: str = "map/real_map/denmark.txt"):
@@ -40,7 +41,9 @@ class EpsilonStarPlusRunner:
             raise FileNotFoundError(f"Map file not found: {map_file}")
 
         print(f"📂 Loading map from: {map_file}")
-        environment, battery_pos_tuple = self.ui.read_map(map_file)
+
+        # ✅ STEP 1: Load map structure (get default battery_pos)
+        environment, _ = self.ui.read_map(map_file)  # Ignore default battery_pos
 
         # Ensure UI is properly updated with loaded map
         self.ui.map = np.array(environment, dtype=object)
@@ -50,12 +53,18 @@ class EpsilonStarPlusRunner:
         print(f"📏 Map dimensions: {self.ui.row_count} x {self.ui.col_count}")
         print(f"🔍 Map preview (first few values): {environment[0][:10] if len(environment) > 0 else 'Empty'}")
 
-        # ✅ INTERACTIVE SETUP PHASE
+        # ✅ STEP 2: INTERACTIVE SETUP PHASE - GET CORRECT BATTERY POSITION
         print(f"🎮 Starting interactive setup...")
-        environment, battery_pos_tuple = self.ui.edit_map()
+        print("⚡ IMPORTANT: Set charging station with RIGHT CLICK!")
 
-        self.environment_array = np.array(environment)
-        self.battery_pos = Position(battery_pos_tuple[0], battery_pos_tuple[1])
+        # ✅ FIXED: Use battery position from interactive setup, not from read_map()
+        final_environment, final_battery_pos = self.ui.edit_map()
+
+        self.environment_array = np.array(final_environment)
+        self.battery_pos = Position(final_battery_pos[0], final_battery_pos[1])
+
+        print(f"✅ Interactive setup complete!")
+        print(f"🔋 Charging station: {self.battery_pos.tuple}")
 
         # Energy configuration theo paper ε⋆+
         self.energy_config = EnergyConfig(
@@ -65,7 +74,7 @@ class EpsilonStarPlusRunner:
             retreat_rate=1.0
         )
 
-        # Create robot
+        # Create robot với CORRECT battery position
         self.robot = EpsilonStarPlusRobot(
             self.battery_pos,
             len(self.environment_array),
@@ -82,11 +91,11 @@ class EpsilonStarPlusRunner:
         self.step_count = 0
         self.start_time = None
 
-        print(f"✅ Map loaded: {self.environment_array.shape}")
-        print(f"🔋 Battery position: {self.battery_pos.tuple}")
-        print(f"⚡ Energy capacity: {self.energy_config.capacity}")
-        print(f"📊 Coverage rate: {self.energy_config.coverage_rate}x")
-        print(f"🏃 Advance/Retreat rate: {self.energy_config.advance_rate}x")
+        print(f"📊 Final Setup Summary:")
+        print(f"   Map size: {self.environment_array.shape}")
+        print(f"   Battery: {self.battery_pos.tuple}")
+        print(f"   Energy: {self.energy_config.capacity}")
+        print(f"   Coverage rate: {self.energy_config.coverage_rate}x")
         print("\n🎮 CONTROLS:")
         print("SPACE: Pause/Resume | LEFT/RIGHT: Speed | S: Screenshot | ESC: Exit")
         print("=" * 60)
@@ -97,7 +106,8 @@ class EpsilonStarPlusRunner:
         running = True
         self.start_time = time.time()
 
-        print(f"\n🚀 Starting ε⋆+ Algorithm on Denmark map...")
+        print(f"\n🚀 Starting ε⋆+ Algorithm...")
+        print(f"🔋 Robot starting from charging station: {self.battery_pos.tuple}")
         print("🔄 ETM State Machine: ST → CP0 → WT → FN")
         print("📈 Real-time statistics will be shown every 100 steps\n")
 
@@ -154,7 +164,7 @@ class EpsilonStarPlusRunner:
 
     def _process_step_info(self, step_info: Dict):
         """
-        🔧 FIXED: Process information from algorithm step
+        ✅ FIXED: Process information from algorithm step
         All UI method calls now pass tuples correctly
         """
         action = step_info.get('action', 'none')
@@ -213,8 +223,14 @@ class EpsilonStarPlusRunner:
             print("           ε⋆+ ALGORITHM - FINAL RESULTS")
             print("🏆" + "=" * 48 + "🏆")
 
+            # Robot configuration
+            print("🤖 ROBOT CONFIGURATION:")
+            print(f"   Starting position:   {self.battery_pos.tuple}")
+            print(f"   Map dimensions:      {self.environment_array.shape}")
+            print(f"   Energy capacity:     {self.energy_config.capacity:8.1f}")
+
             # Path statistics
-            print("📏 PATH STATISTICS:")
+            print("\n📏 PATH STATISTICS:")
             print(f"   Coverage length:     {stats['coverage_length']:8.2f}")
             print(f"   Retreat length:      {stats['retreat_length']:8.2f}")
             print(f"   Advance length:      {stats['advance_length']:8.2f}")
@@ -258,6 +274,7 @@ class EpsilonStarPlusRunner:
 
         return {
             'algorithm': 'ε⋆+',
+            'battery_position': self.battery_pos.tuple,
             'total_path_length': stats['total_path_length'],
             'coverage_length': stats['coverage_length'],
             'overlap_rate': stats.get('overlap_rate', 0),
@@ -268,7 +285,7 @@ class EpsilonStarPlusRunner:
 
 
 def main():
-    """Main function - Only real maps, no demos"""
+    """Main function - Only real maps, properly initialized"""
     import argparse
 
     parser = argparse.ArgumentParser(description='ε⋆+ Algorithm Runner')
@@ -277,6 +294,12 @@ def main():
                        help='Path to map file (default: map/real_map/denmark.txt)')
 
     args = parser.parse_args()
+
+    print("🚀 ε⋆+ Coverage Path Planning")
+    print("=" * 40)
+    print("✅ Fixed battery position initialization")
+    print("🎮 Interactive setup required!")
+    print()
 
     runner = EpsilonStarPlusRunner(args.map)
     runner.run()

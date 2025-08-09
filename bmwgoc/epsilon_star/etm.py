@@ -1,6 +1,6 @@
 """
 epsilon_star/etm.py - FIXED VERSION
-Exploratory Turing Machine với complete coverage guarantee
+Exploratory Turing Machine với PROPER obstacle avoidance
 """
 
 import numpy as np
@@ -10,7 +10,8 @@ from .core import MAPSHierarchy, Position, ETMState, CellState
 
 class ExploratoryTuringMachine:
     """
-    FIXED ETM Implementation với complete coverage guarantee
+    FIXED ETM Implementation với proper obstacle avoidance
+    ✅ Robot will NEVER move into obstacle cells
     """
 
     def __init__(self, rows: int, cols: int):
@@ -23,7 +24,7 @@ class ExploratoryTuringMachine:
     def get_waypoint(self, current_pos: Position,
                      obstacle_locations: Optional[List[Position]] = None) -> List[Position]:
         """
-        Main ETM control function δ với complete coverage guarantee
+        Main ETM control function δ với PROPER obstacle avoidance
         """
         # Update MAPS with obstacle information
         if obstacle_locations:
@@ -61,7 +62,7 @@ class ExploratoryTuringMachine:
 
     def _handle_cp0_state(self, current_pos: Position) -> List[Position]:
         """
-        CP0 State: Compute waypoint at Level 0
+        CP0 State: Compute waypoint at Level 0 với OBSTACLE AVOIDANCE
         Implementation của Algorithm 1 Lines 1-12
         """
         self.maps.update_level_0()
@@ -69,7 +70,7 @@ class ExploratoryTuringMachine:
         # Get local neighborhood N^0(λ)
         neighborhood = self.maps.get_local_neighborhood(current_pos, 0)
 
-        # Form computing set D^0 theo Equation (4)
+        # ✅ FIXED: Form computing set D^0 với PROPER obstacle filtering
         computing_set = self._form_computing_set_level_0(current_pos, neighborhood)
 
         # Algorithm 1 implementation
@@ -80,9 +81,16 @@ class ExploratoryTuringMachine:
             λ_down = Position(λ.row + 1, λ.col)
 
             if λ_up in computing_set and λ_down in computing_set:  # Line 4
-                # Line 5: wp(k) = {λ_up, λ_down}
-                self.current_wp = [λ_up, λ_down]
-                return self.current_wp
+                # Line 5: wp(k) = {λ_up, λ_down} - but filter obstacles!
+                valid_waypoints = self._filter_obstacle_waypoints([λ_up, λ_down])
+                if valid_waypoints:
+                    self.current_wp = valid_waypoints
+                    return self.current_wp
+                else:
+                    # Both blocked by obstacles, task current cell
+                    self.current_wp = [λ]
+                    self.state = ETMState.WT
+                    return self.current_wp
             else:
                 # Line 6: set λ as waypoint and start tasking
                 self.current_wp = [λ]
@@ -90,22 +98,30 @@ class ExploratoryTuringMachine:
                 return self.current_wp
 
         elif computing_set:  # Line 7: other eligible ε-cells exist
-            # Line 8: pick ones with max potential
+            # Line 8: pick ones with max potential - but filter obstacles!
             max_potential_cells = self._get_argmax_potential(computing_set, 0)
-            self.current_wp = max_potential_cells
-            return self.current_wp
-
-        else:
-            # Line 9-11: Check pre-computed wp
-            if (self.prev_wp and len(self.prev_wp) > 0 and
-                    self.maps.get_potential(self.prev_wp[0], 0) > 0):
-                self.current_wp = self.prev_wp
+            valid_waypoints = self._filter_obstacle_waypoints(max_potential_cells)
+            if valid_waypoints:
+                self.current_wp = valid_waypoints
                 return self.current_wp
             else:
-                # Line 11: local extremum detected at Level 0
+                # All max potential cells are obstacles - local extremum
                 self.current_wp = None
                 self.state = ETMState.CP1
                 return self.get_waypoint(current_pos)  # Recursive call
+
+        else:
+            # Line 9-11: Check pre-computed wp
+            if (self.prev_wp and len(self.prev_wp) > 0):
+                valid_prev_wp = self._filter_obstacle_waypoints(self.prev_wp)
+                if valid_prev_wp and self.maps.get_potential(valid_prev_wp[0], 0) > 0:
+                    self.current_wp = valid_prev_wp
+                    return self.current_wp
+
+            # Line 11: local extremum detected at Level 0
+            self.current_wp = None
+            self.state = ETMState.CP1
+            return self.get_waypoint(current_pos)  # Recursive call
 
     def _handle_cpl_state(self, current_pos: Position, level: int) -> List[Position]:
         """
@@ -134,9 +150,19 @@ class ExploratoryTuringMachine:
                 best_coarse_cell, level
             )
 
-            self.current_wp = [target_epsilon_cell]
-            self.state = ETMState.CP0
-            return self.current_wp
+            # ✅ FIXED: Verify target is not obstacle before returning
+            if not self._is_obstacle(target_epsilon_cell):
+                self.current_wp = [target_epsilon_cell]
+                self.state = ETMState.CP0
+                return self.current_wp
+            else:
+                # Target is obstacle, try next level
+                if level < 2:
+                    self.state = ETMState.CP2 if level == 1 else ETMState.FN
+                    return self.get_waypoint(current_pos)
+                else:
+                    self.state = ETMState.FN
+                    return []
         else:
             # Line 17: no waypoint found at Level l
             if level < 2:  # Try next level
@@ -149,6 +175,35 @@ class ExploratoryTuringMachine:
     def _handle_wait_state(self, current_pos: Position) -> List[Position]:
         """WT State: Wait for task completion"""
         return [current_pos]
+
+    def _filter_obstacle_waypoints(self, waypoints: List[Position]) -> List[Position]:
+        """
+        ✅ CRITICAL FIX: Filter out obstacle waypoints
+        This prevents robot from moving into walls!
+        """
+        if not waypoints:
+            return []
+
+        valid_waypoints = []
+        for wp in waypoints:
+            if not self._is_obstacle(wp):
+                valid_waypoints.append(wp)
+            else:
+                if self.debug_mode:
+                    print(f"ETM: Filtered obstacle waypoint {wp.tuple}")
+
+        return valid_waypoints
+
+    def _is_obstacle(self, pos: Position) -> bool:
+        """
+        ✅ CRITICAL: Check if position is obstacle
+        This is the KEY function that prevents wall-walking!
+        """
+        if not self.maps._is_valid_position(pos, 0):
+            return True  # Out of bounds = obstacle
+
+        state = self.maps.states[pos.row, pos.col]
+        return state == CellState.O
 
     def _count_global_unexplored(self) -> int:
         """Count total unexplored cells globally"""
@@ -184,13 +239,16 @@ class ExploratoryTuringMachine:
     def _form_computing_set_level_0(self, current_pos: Position,
                                     neighborhood: List[Position]) -> List[Position]:
         """
-        FIXED D^0 formation với improved reachability
+        ✅ FIXED D^0 formation với PROPER obstacle avoidance
         """
         computing_set = []
 
         for pos in neighborhood:
             potential = self.maps.get_potential(pos, 0)
-            if potential > 0 and self._is_directly_reachable(current_pos, pos):
+            # ✅ CRITICAL: Check both potential > 0 AND not obstacle
+            if (potential > 0 and
+                not self._is_obstacle(pos) and
+                self._is_directly_reachable(current_pos, pos)):
                 computing_set.append(pos)
 
         return computing_set
@@ -212,14 +270,17 @@ class ExploratoryTuringMachine:
 
     def _is_directly_reachable(self, from_pos: Position, to_pos: Position) -> bool:
         """
-        Definition 3.2: Directly Reachable Set
-        Simplified: check if target is not obstacle
+        Definition 3.2: Directly Reachable Set với obstacle checking
         """
         if not self.maps._is_valid_position(to_pos, 0):
             return False
 
-        state = self.maps.states[to_pos.row, to_pos.col]
-        return state != CellState.O
+        # ✅ CRITICAL: Must not be obstacle
+        if self._is_obstacle(to_pos):
+            return False
+
+        # Additional line-of-sight check could be added here
+        return True
 
     def _has_line_of_sight(self, from_pos: Position, to_pos: Position) -> bool:
         """Check line of sight between two positions"""
@@ -274,18 +335,27 @@ class ExploratoryTuringMachine:
             print(f"ETM: Task completed at {pos.tuple}, {remaining} cells remaining")
 
     def set_environment(self, environment_array: np.ndarray):
-        """Set initial environment (1=obstacle, 0=free)"""
+        """
+        ✅ FIXED: Set initial environment with PROPER obstacle marking
+        """
+        obstacle_count = 0
         for row in range(len(environment_array)):
             for col in range(len(environment_array[0])):
-                if environment_array[row, col] == 1:
+                # ✅ CRITICAL: Handle both 1 and '1' as obstacles
+                cell_value = environment_array[row, col]
+                if cell_value == 1 or cell_value == '1':
                     self.maps.set_state(Position(row, col), CellState.O)
+                    obstacle_count += 1
 
         self.maps.update_all_levels()
 
+        total_cells = len(environment_array) * len(environment_array[0])
+        free_cells = total_cells - obstacle_count
+
         if self.debug_mode:
-            total_free = np.sum(environment_array == 0)
-            total_obstacles = np.sum(environment_array == 1)
-            print(f"ETM: Environment set - {total_free} free, {total_obstacles} obstacles")
+            print(f"ETM: Environment set - {free_cells} free, {obstacle_count} obstacles")
+
+        print(f"🗺️  ETM Environment loaded: {total_cells} total, {obstacle_count} obstacles, {free_cells} free")
 
     def is_coverage_complete(self) -> bool:
         """Check if coverage complete (state = FN)"""
