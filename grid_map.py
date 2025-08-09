@@ -52,13 +52,17 @@ class Grid_Map:
         self.battery_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
         # self.vehicle_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
 
-        self.trajectories = [[(0, 0)]] # list of trajectories (currently only coverage path)
+        self.trajectories = [[(0, 0)]]  # list of trajectories (currently only coverage path)
 
-        self.move_status = 0 # 0: normal coverage, 1: retreat, 2: charge, 3: advance
-        self.charge_path_plan = [] # share between retreat & advance
+        self.move_status = 0  # 0: normal coverage, 1: retreat, 2: charge, 3: advance
+        self.charge_path_plan = []  # share between retreat & advance
 
         self.info_bar = None
         self.energy_display = None
+
+        # Shift mode for creating unknown obstacles
+        self.shift_mode = False
+        self.unknown_obstacles = set()  # Track unknown obstacles
 
     def read_map(self, filepath):
         with open(filepath, "r", encoding="utf-8") as f:
@@ -104,20 +108,39 @@ class Grid_Map:
                         self.update_battery_pos((row, col))
                         self.trajectories[0] = [(row, col)]
                         self.map[row][col] = 0
-                        
+
                 elif event.type == pg.MOUSEBUTTONUP:
                     draw_obstacle = False
                     prev_cell = None
-            
+                elif event.type == pg.KEYDOWN:
+                    if event.key == pg.K_LSHIFT:
+                        # Enable shift mode for creating unknown obstacles
+                        self.shift_mode = True
+                elif event.type == pg.KEYUP:
+                    if event.key == pg.K_LSHIFT:
+                        self.shift_mode = False
+
             # check boolean flag to allow holding left click to draw
             if draw_obstacle:
                 if self.check_valid_pos((row, col)) == False: continue
                 if (prev_cell != (row, col)):
                     prev_cell = (row, col)
-                    if self.map[row][col] == 0 and self.battery_pos != (row, col):
-                        self.map[row][col] = 1
+
+                    if hasattr(self, 'shift_mode') and self.shift_mode:
+                        # Shift + click creates unknown obstacles (red)
+                        if (row, col) not in self.unknown_obstacles and self.battery_pos != (row, col):
+                            self.unknown_obstacles.add((row, col))
+                            # Notify robot about new obstacle if robot exists
+                            if hasattr(self, 'robot_callback'):
+                                self.robot_callback((row, col))
+                        elif (row, col) in self.unknown_obstacles:
+                            self.unknown_obstacles.remove((row, col))
                     else:
-                        self.map[row][col] = 0
+                        # Normal click creates/removes known obstacles
+                        if self.map[row][col] == 0 and self.battery_pos != (row, col):
+                            self.map[row][col] = 1
+                        else:
+                            self.map[row][col] = 0
 
             # pygame draw
             self.draw_map()
@@ -171,9 +194,11 @@ class Grid_Map:
 
                 elif self.map[row][col] == '_':
                     color = GREY
-
                 elif self.map[row][col] == 'e':
                     color = GREEN
+                 # Draw unknown obstacles in red
+                if hasattr(self, 'unknown_obstacles') and (row, col) in self.unknown_obstacles:
+                    color = RED
                 
                 pg.draw.rect(self.grid_surface,
                             color,
@@ -323,6 +348,15 @@ class Grid_Map:
     
     def set_energy_display(self, energy):
         self.energy_display = round(energy, 2)
+
+    def set_robot_callback(self, callback):
+        """Set callback function to notify robot of new obstacles"""
+        self.robot_callback = callback
+
+    def add_unknown_obstacle(self, pos):
+        """Add unknown obstacle at runtime"""
+        if hasattr(self, 'unknown_obstacles'):
+            self.unknown_obstacles.add(pos)
 
     def check_valid_pos(self, pos):
         row, col = pos
