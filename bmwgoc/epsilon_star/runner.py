@@ -1,7 +1,6 @@
 """
 epsilon_star/runner.py
-BWave Integration Runner
-Chạy ε⋆+ Algorithm trong môi trường BWave
+BWave Integration Runner cho ε⋆+ Algorithm
 """
 
 import numpy as np
@@ -29,28 +28,44 @@ class EpsilonStarPlusRunner:
         # Initialize UI
         self.ui = Grid_Map()
 
+        # Initialize pygame first
+        import pygame as pg
+        pg.init()
+
         # Load map
         if map_file and os.path.exists(map_file):
+            print(f"Loading map from: {map_file}")
             environment, battery_pos_tuple = self.ui.read_map(map_file)
+
+            # Fix: Ensure UI is properly updated with loaded map
+            self.ui.map = environment
+            self.ui.row_count = len(environment)
+            self.ui.col_count = len(environment[0])
+
         else:
-            print("Map file not found, using manual edit mode...")
-            # Initialize pygame first for edit mode
-            import pygame as pg
-            pg.init()
-            # Set default map size for edit mode
-            self.ui.row_count = 20
-            self.ui.col_count = 20
-            self.ui.map = [[0 for _ in range(20)] for _ in range(20)]
-            environment, battery_pos_tuple = self.ui.edit_map()
+            print("Map file not found, using interactive edit mode...")
+            print("Instructions:")
+            print("• Left click: Place/remove obstacles")
+            print("• Right click: Set charging station")
+            print("• Press any key when done")
+
+            try:
+                # Get map through edit mode
+                environment, battery_pos_tuple = self.ui.edit_map()
+            except Exception as e:
+                print(f"Edit mode failed: {e}")
+                print("Creating default test environment...")
+                environment = self._create_default_environment()
+                battery_pos_tuple = (0, 0)
 
         self.environment_array = np.array(environment)
         self.battery_pos = Position(battery_pos_tuple[0], battery_pos_tuple[1])
 
-        # Energy configuration
+        # Energy configuration theo paper ε⋆+
         self.energy_config = EnergyConfig(
             capacity=1000.0,
-            coverage_rate=2.0,
-            advance_rate=1.0,
+            coverage_rate=2.0,    # "twice this amount for coverage segment"
+            advance_rate=1.0,     # "proportional to trajectory length"
             retreat_rate=1.0
         )
 
@@ -75,6 +90,28 @@ class EpsilonStarPlusRunner:
         print(f"Battery position: {self.battery_pos.tuple}")
         print("\nControls:")
         print("SPACE: Pause/Resume | LEFT/RIGHT: Speed | S: Screenshot | ESC: Exit")
+
+    def _create_default_environment(self):
+        """Create default test environment"""
+        env = []
+        for i in range(20):
+            row = []
+            for j in range(20):
+                if i == 0 or i == 19 or j == 0 or j == 19:  # Borders
+                    row.append(1)
+                elif 5 <= i <= 14 and j == 10:  # Vertical wall
+                    row.append(1)
+                elif i == 10 and 5 <= j <= 14:  # Horizontal wall
+                    row.append(1)
+                else:
+                    row.append(0)
+            env.append(row)
+
+        # Create openings
+        env[7][10] = 0  # Opening in vertical wall
+        env[10][12] = 0  # Opening in horizontal wall
+
+        return env
 
     def run(self):
         """Main execution loop"""
@@ -144,21 +181,24 @@ class EpsilonStarPlusRunner:
             segment = step_info['segment']
 
             if segment == 'coverage':
-                self.ui.move_to(pos)
+                # Fix: Pass individual coordinates
+                self.ui.move_to(pos[0], pos[1])
             elif segment == 'retreat':
-                self.ui.move_retreat(pos)
+                self.ui.move_retreat(pos[0], pos[1])
             elif segment == 'advance':
-                self.ui.move_advance(pos)
+                self.ui.move_advance(pos[0], pos[1])
 
         elif action == 'task':
             pos = step_info['position']
-            self.ui.task(pos)
+            # Fix: Pass individual coordinates instead of tuple
+            self.ui.task(pos[0], pos[1])
 
         elif action == 'energy_cycle':
             print(f"Energy cycle #{self.robot.stats['return_count']} completed")
 
         # Update UI energy display
-        self.ui.set_energy_display(self.robot.energy)
+        if hasattr(self.ui, 'set_energy_display'):
+            self.ui.set_energy_display(self.robot.energy)
 
     def _update_ui(self):
         """Update UI visualization"""
@@ -175,40 +215,44 @@ class EpsilonStarPlusRunner:
 
     def _print_final_results(self):
         """Print final results"""
-        execution_time = time.time() - self.start_time
-        stats = self.robot.get_statistics()
+        if not hasattr(self, '_results_printed'):
+            execution_time = time.time() - self.start_time if self.start_time else 0
+            stats = self.robot.get_statistics()
 
-        print("\n" + "=" * 50)
-        print("ε⋆+ ALGORITHM - FINAL RESULTS")
-        print("=" * 50)
+            print("\n" + "=" * 50)
+            print("ε⋆+ ALGORITHM - FINAL RESULTS")
+            print("=" * 50)
 
-        # Path statistics
-        print("PATH STATISTICS:")
-        print(f"  Coverage length:     {stats['coverage_length']:8.2f}")
-        print(f"  Retreat length:      {stats['retreat_length']:8.2f}")
-        print(f"  Advance length:      {stats['advance_length']:8.2f}")
-        print(f"  Total path length:   {stats['total_path_length']:8.2f}")
+            # Path statistics
+            print("PATH STATISTICS:")
+            print(f"  Coverage length:     {stats['coverage_length']:8.2f}")
+            print(f"  Retreat length:      {stats['retreat_length']:8.2f}")
+            print(f"  Advance length:      {stats['advance_length']:8.2f}")
+            print(f"  Total path length:   {stats['total_path_length']:8.2f}")
 
-        # Coverage statistics
-        print("\nCOVERAGE STATISTICS:")
-        print(f"  Coverage percentage: {stats['coverage_percentage']:8.1f}%")
-        if 'overlap_rate' in stats:
-            print(f"  Overlap rate:        {stats['overlap_rate']:8.2f}%")
+            # Coverage statistics
+            print("\nCOVERAGE STATISTICS:")
+            print(f"  Coverage percentage: {stats['coverage_percentage']:8.1f}%")
+            if 'overlap_rate' in stats:
+                print(f"  Overlap rate:        {stats['overlap_rate']:8.2f}%")
 
-        # Operational statistics
-        print("\nOPERATIONAL STATISTICS:")
-        print(f"  Number of returns:   {stats['return_count']:8d}")
-        print(f"  Number of tasks:     {stats['task_count']:8d}")
-        print(f"  Total steps:         {self.step_count:8d}")
-        print(f"  Final energy:        {self.robot.energy:8.1f}")
+            # Operational statistics
+            print("\nOPERATIONAL STATISTICS:")
+            print(f"  Number of returns:   {stats['return_count']:8d}")
+            print(f"  Number of tasks:     {stats['task_count']:8d}")
+            print(f"  Total steps:         {self.step_count:8d}")
+            print(f"  Final energy:        {self.robot.energy:8.1f}")
 
-        # Performance statistics
-        print("\nPERFORMANCE STATISTICS:")
-        print(f"  Execution time:      {execution_time:8.3f}s")
-        print(f"  Steps per second:    {self.step_count/execution_time:8.1f}")
-        print(f"  ETM final state:     {self.robot.etm.get_state().value}")
+            # Performance statistics
+            print("\nPERFORMANCE STATISTICS:")
+            print(f"  Execution time:      {execution_time:8.3f}s")
+            if execution_time > 0:
+                print(f"  Steps per second:    {self.step_count/execution_time:8.1f}")
+            print(f"  ETM final state:     {self.robot.etm.get_state().value}")
 
-        print("=" * 50)
+            print("=" * 50)
+
+            self._results_printed = True
 
     def _save_screenshot(self):
         """Save screenshot"""
