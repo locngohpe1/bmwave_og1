@@ -10,15 +10,19 @@ WHITE = (255, 255, 255)
 GREY = (197, 198, 208)
 RED = (255, 0, 0)
 GREEN = (108, 217, 115)
+# GREEN2 = (82, 166, 88)
+GREEN2 = (70, 140, 74)
+GREEN3 = (57, 115, 61)
+# GREEN4 = (32, 64, 34)
+GREEN4 = (44, 89, 47)
 YELLOW = (255, 243, 128)
 BLUE = (5, 16, 148)
 LIGHT_BLUE = (0, 191, 255)
 BROWN = (76, 1, 33)
 LIGHT_ORANGE = (255, 140, 0)
-PURPLE = (128, 0, 128)
 
 # epsilon value (size of cell)
-EPSILON = 8
+EPSILON = 15
 
 BORDER = 1
 INFO_BAR_HEIGHT = 30
@@ -32,7 +36,7 @@ def hsv2rgb(h, s, v):
     return (int(255*r), int(255*g), int(255*b)) 
  
 def getDistinctColors(n): 
-    huePartition = 1.0 / (n + 1)
+    huePartition = 1.0 / (n + 1) 
     # return [hsv2rgb(huePartition * value, 1.0, 1.0) for value in range(0, n)]
     return [LIGHT_BLUE] * n
 
@@ -53,17 +57,13 @@ class Grid_Map:
         self.battery_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
         # self.vehicle_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
 
-        self.trajectories = [[(0, 0)]]  # list of trajectories (currently only coverage path)
+        self.trajectories = [[(0, 0)]] # list of trajectories (currently only coverage path)
 
-        self.move_status = 0  # 0: normal coverage, 1: retreat, 2: charge, 3: advance
-        self.charge_path_plan = []  # share between retreat & advance
+        self.move_status = 0 # 0: normal coverage, 1: retreat, 2: charge, 3: advance
+        self.charge_path_plan = [] # share between retreat & advance
 
         self.info_bar = None
         self.energy_display = None
-
-        # Shift mode for creating unknown obstacles
-        self.shift_mode = False
-        self.unknown_obstacles = set()  # Track unknown obstacles
 
     def read_map(self, filepath):
         with open(filepath, "r", encoding="utf-8") as f:
@@ -109,39 +109,20 @@ class Grid_Map:
                         self.update_battery_pos((row, col))
                         self.trajectories[0] = [(row, col)]
                         self.map[row][col] = 0
-
+                        
                 elif event.type == pg.MOUSEBUTTONUP:
                     draw_obstacle = False
                     prev_cell = None
-                elif event.type == pg.KEYDOWN:
-                    if event.key == pg.K_LSHIFT:
-                        # Enable shift mode for creating unknown obstacles
-                        self.shift_mode = True
-                elif event.type == pg.KEYUP:
-                    if event.key == pg.K_LSHIFT:
-                        self.shift_mode = False
-
+            
             # check boolean flag to allow holding left click to draw
             if draw_obstacle:
                 if self.check_valid_pos((row, col)) == False: continue
                 if (prev_cell != (row, col)):
                     prev_cell = (row, col)
-
-                    if hasattr(self, 'shift_mode') and self.shift_mode:
-                        # Shift + click creates unknown obstacles (red)
-                        if (row, col) not in self.unknown_obstacles and self.battery_pos != (row, col):
-                            self.unknown_obstacles.add((row, col))
-                            # Notify robot about new obstacle if robot exists
-                            if hasattr(self, 'robot_callback'):
-                                self.robot_callback((row, col))
-                        elif (row, col) in self.unknown_obstacles:
-                            self.unknown_obstacles.remove((row, col))
+                    if self.map[row][col] == 0 and self.battery_pos != (row, col):
+                        self.map[row][col] = 1
                     else:
-                        # Normal click creates/removes known obstacles
-                        if self.map[row][col] == 0 and self.battery_pos != (row, col):
-                            self.map[row][col] = 1
-                        else:
-                            self.map[row][col] = 0
+                        self.map[row][col] = 0
 
             # pygame draw
             self.draw_map()
@@ -167,8 +148,8 @@ class Grid_Map:
         self.WIN.blit(self.grid_surface, (0, 0))
         pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
     
-        for coverage_path in self.trajectories:
-            self.draw_path(coverage_path)
+        # for coverage_path in self.trajectories:
+        #     self.draw_path(coverage_path)
         
         if self.move_status == 1: # retreat
             self.draw_path(self.charge_path_plan, BROWN)
@@ -176,14 +157,8 @@ class Grid_Map:
             self.draw_path(self.charge_path_plan, BLUE)
 
         pg.draw.rect(self.WIN, YELLOW, self.battery_img)
-        vehicle_center = ((self.vehicle_pos[1] + 1 / 2) * EPSILON + BORDER,
-                          (self.vehicle_pos[0] + 1 / 2) * EPSILON + BORDER)
 
-        # Draw sensor range visualization (8-connected neighbors from Deep Q-learning paper)
-        sensor_radius = EPSILON * 1.5  # Sensor range visualization
-        pg.draw.circle(self.WIN, (100, 100, 100), vehicle_center, sensor_radius, width=1)  # Gray sensor circle
-
-        # Draw robot
+        vehicle_center = ((self.vehicle_pos[1] + 1/2) * EPSILON + BORDER, (self.vehicle_pos[0] + 1/2) * EPSILON + BORDER)
         pg.draw.circle(self.WIN, BLACK, vehicle_center, EPSILON / 3, width=0)
 
         energy_display_img = font.render('Energy: ' + str(self.energy_display), True, RED)
@@ -196,15 +171,20 @@ class Grid_Map:
         for row in range(len(self.map)):
             for col in range(len(self.map[0])):
                 color = WHITE
-                if self.map[row][col] in (1, 'o'): # dùng chung cho map.txt
+                if self.map[row][col] == -1:
                     color = BLACK
 
-                elif self.map[row][col] == '_':
-                    color = GREY
-                elif self.map[row][col] == 'e':
+                elif self.map[row][col] == 1:
                     color = GREEN
-                if hasattr(self, 'unknown_obstacles') and (row, col) in self.unknown_obstacles:
-                    color = PURPLE  # PURPLE for unknown obstacles
+
+                elif self.map[row][col] == 2:
+                    color = GREEN2
+                elif self.map[row][col] == 3:
+                    color = GREEN3
+                elif self.map[row][col] == 4:
+                    color = GREEN4
+                elif self.map[row][col] > 4:
+                    color = RED
                 
                 pg.draw.rect(self.grid_surface,
                             color,
@@ -215,6 +195,28 @@ class Grid_Map:
                     
         self.WIN.blit(self.grid_surface, (0, 0))
         pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
+
+    # def draw_map(self):
+    #     self.WIN.fill(BLACK)
+    #     pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
+    #     for row in range(len(self.map)):
+    #         for col in range(len(self.map[0])):
+    #             color = WHITE
+    #             if self.map[row][col] in (1, 'o'): # dùng chung cho map.txt
+    #                 color = BLACK
+
+    #             elif self.map[row][col] == '_':
+    #                 color = GREY
+
+    #             elif self.map[row][col] == 'e':
+    #                 color = GREEN
+                
+    #             pg.draw.rect(self.WIN,
+    #                         color,
+    #                         [EPSILON * col + BORDER,
+    #                         EPSILON * row + BORDER,
+    #                         EPSILON - BORDER,
+    #                         EPSILON - BORDER])
 
     def illustrate_regions(self, decomposed, region_count):
         self.WIN.fill(BLACK)
@@ -295,9 +297,16 @@ class Grid_Map:
         # self.vehicle_img.y = EPSILON * pos[0] + BORDER
 
     def task(self, pos):
-        self.map[pos] = 'e'
+        color = None
+        if self.map[pos] == 1:
+            color = GREEN
+        elif self.map[pos] == 2:
+            color = GREEN2
+        elif self.map[pos] == 3:
+            color = GREEN4
+        elif self.map[pos] > 3:
+            color = RED
 
-        color = GREEN
         row, col = pos
         pg.draw.rect(self.grid_surface, 
             color,
@@ -333,15 +342,6 @@ class Grid_Map:
     def set_energy_display(self, energy):
         self.energy_display = round(energy, 2)
 
-    def set_robot_callback(self, callback):
-        """Set callback function to notify robot of new obstacles"""
-        self.robot_callback = callback
-
-    def add_unknown_obstacle(self, pos):
-        """Add unknown obstacle at runtime"""
-        if hasattr(self, 'unknown_obstacles'):
-            self.unknown_obstacles.add(pos)
-
     def check_valid_pos(self, pos):
         row, col = pos
         if row < 0 or row >= self.row_count: return False
@@ -351,9 +351,8 @@ class Grid_Map:
 
 def main():
     ui = Grid_Map()
-    ui.read_map('map/tmp2.txt')
+    ui.read_map('map/empty_map.txt')
     ui.edit_map()
-    pg.image.save(ui.WIN, 'tmp/screenshot.png')
 
     pg.quit()
 

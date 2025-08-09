@@ -7,22 +7,20 @@ import random
 # Color
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
-GREY = (197, 198, 208)
+# GREY = (197, 198, 208)
+GREY = (158, 159, 166)
 RED = (255, 0, 0)
 GREEN = (108, 217, 115)
 YELLOW = (255, 243, 128)
 BLUE = (5, 16, 148)
 LIGHT_BLUE = (0, 191, 255)
 BROWN = (76, 1, 33)
-LIGHT_ORANGE = (255, 140, 0)
-PURPLE = (128, 0, 128)
 
-# epsilon value (size of cell)
-EPSILON = 8
+# epsilon value (size of 𝜀-cell)
+EPSILON = 25
 
 BORDER = 1
 INFO_BAR_HEIGHT = 30
-GAP = 3
 
 pg.init()
 font = pg.font.SysFont(None, 30)
@@ -32,8 +30,8 @@ def hsv2rgb(h, s, v):
     return (int(255*r), int(255*g), int(255*b)) 
  
 def getDistinctColors(n): 
-    huePartition = 1.0 / (n + 1)
-    # return [hsv2rgb(huePartition * value, 1.0, 1.0) for value in range(0, n)]
+    huePartition = 1.0 / (n + 1) 
+    return [hsv2rgb(huePartition * value, 1.0, 1.0) for value in range(0, n)]
     return [LIGHT_BLUE] * n
 
 class Grid_Map:
@@ -41,7 +39,6 @@ class Grid_Map:
         # pg.init()
         pg.display.set_caption("Coverage")
         self.WIN = None
-        self.grid_surface = None
 
         self.map = None
         self.row_count = 0
@@ -51,19 +48,15 @@ class Grid_Map:
         self.vehicle_pos = (0, 0)
 
         self.battery_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
-        # self.vehicle_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
+        self.vehicle_img = pg.Rect(BORDER, BORDER, EPSILON - BORDER, EPSILON - BORDER)
 
-        self.trajectories = [[(0, 0)]]  # list of trajectories (currently only coverage path)
+        self.trajectories = [[(0, 0)]] # list of trajectories (currently only coverage path)
 
-        self.move_status = 0  # 0: normal coverage, 1: retreat, 2: charge, 3: advance
-        self.charge_path_plan = []  # share between retreat & advance
+        self.move_status = 0 # 0: normal coverage, 1: retreat, 2: charge, 3: advance
+        self.charge_path_plan = [] # share between retreat & advance
 
         self.info_bar = None
         self.energy_display = None
-
-        # Shift mode for creating unknown obstacles
-        self.shift_mode = False
-        self.unknown_obstacles = set()  # Track unknown obstacles
 
     def read_map(self, filepath):
         with open(filepath, "r", encoding="utf-8") as f:
@@ -72,12 +65,10 @@ class Grid_Map:
             display_size = [EPSILON * self.col_count + 1, EPSILON * self.row_count + INFO_BAR_HEIGHT]
             self.info_bar = pg.Rect(0, EPSILON * self.row_count + BORDER, EPSILON * self.col_count, EPSILON * self.row_count + INFO_BAR_HEIGHT)
             self.WIN = pg.display.set_mode(display_size)
-            self.grid_surface = pg.Surface((EPSILON * self.col_count + 1, EPSILON * self.row_count))
 
             map = []
             for idx, line in enumerate(f):
-                line = [int(value) for value in line.strip().split()]
-                line = line[0:self.col_count]
+                line =[int(value) for value in line.strip().split()]
                 map.append(line)
             
             if len(map) == 0:
@@ -109,39 +100,20 @@ class Grid_Map:
                         self.update_battery_pos((row, col))
                         self.trajectories[0] = [(row, col)]
                         self.map[row][col] = 0
-
+                        
                 elif event.type == pg.MOUSEBUTTONUP:
                     draw_obstacle = False
                     prev_cell = None
-                elif event.type == pg.KEYDOWN:
-                    if event.key == pg.K_LSHIFT:
-                        # Enable shift mode for creating unknown obstacles
-                        self.shift_mode = True
-                elif event.type == pg.KEYUP:
-                    if event.key == pg.K_LSHIFT:
-                        self.shift_mode = False
-
+            
             # check boolean flag to allow holding left click to draw
             if draw_obstacle:
                 if self.check_valid_pos((row, col)) == False: continue
                 if (prev_cell != (row, col)):
                     prev_cell = (row, col)
-
-                    if hasattr(self, 'shift_mode') and self.shift_mode:
-                        # Shift + click creates unknown obstacles (red)
-                        if (row, col) not in self.unknown_obstacles and self.battery_pos != (row, col):
-                            self.unknown_obstacles.add((row, col))
-                            # Notify robot about new obstacle if robot exists
-                            if hasattr(self, 'robot_callback'):
-                                self.robot_callback((row, col))
-                        elif (row, col) in self.unknown_obstacles:
-                            self.unknown_obstacles.remove((row, col))
+                    if self.map[row][col] == 0 and self.battery_pos != (row, col):
+                        self.map[row][col] = 1
                     else:
-                        # Normal click creates/removes known obstacles
-                        if self.map[row][col] == 0 and self.battery_pos != (row, col):
-                            self.map[row][col] = 1
-                        else:
-                            self.map[row][col] = 0
+                        self.map[row][col] = 0
 
             # pygame draw
             self.draw_map()
@@ -163,28 +135,20 @@ class Grid_Map:
             print("Save map done!")
     
     def draw(self):
-        # self.draw_map()
-        self.WIN.blit(self.grid_surface, (0, 0))
-        pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
+        self.draw_map()
     
         for coverage_path in self.trajectories:
             self.draw_path(coverage_path)
         
         if self.move_status == 1: # retreat
-            self.draw_path(self.charge_path_plan, BROWN)
+            self.draw_path(self.charge_path_plan, BROWN, 4)
         elif self.move_status == 3: # advance
-            self.draw_path(self.charge_path_plan, BLUE)
+            self.draw_path(self.charge_path_plan, BLUE, 4)
 
         pg.draw.rect(self.WIN, YELLOW, self.battery_img)
-        vehicle_center = ((self.vehicle_pos[1] + 1 / 2) * EPSILON + BORDER,
-                          (self.vehicle_pos[0] + 1 / 2) * EPSILON + BORDER)
-
-        # Draw sensor range visualization (8-connected neighbors from Deep Q-learning paper)
-        sensor_radius = EPSILON * 1.5  # Sensor range visualization
-        pg.draw.circle(self.WIN, (100, 100, 100), vehicle_center, sensor_radius, width=1)  # Gray sensor circle
-
-        # Draw robot
-        pg.draw.circle(self.WIN, BLACK, vehicle_center, EPSILON / 3, width=0)
+        # pg.draw.rect(self.WIN, RED, self.vehicle_img)
+        # vehicle_center = ((self.vehicle_pos[1] + 1/2) * EPSILON + BORDER, (self.vehicle_pos[0] + 1/2) * EPSILON + BORDER)
+        # pg.draw.circle(self.WIN, BLACK, vehicle_center, EPSILON / 3, width=0)
 
         energy_display_img = font.render('Energy: ' + str(self.energy_display), True, RED)
         self.WIN.blit(energy_display_img, (self.info_bar.x + 5, self.info_bar.y + 5))
@@ -192,7 +156,8 @@ class Grid_Map:
         pg.display.flip()
 
     def draw_map(self):
-        self.grid_surface.fill(BLACK)
+        self.WIN.fill(BLACK)
+        pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
         for row in range(len(self.map)):
             for col in range(len(self.map[0])):
                 color = WHITE
@@ -201,20 +166,29 @@ class Grid_Map:
 
                 elif self.map[row][col] == '_':
                     color = GREY
+
                 elif self.map[row][col] == 'e':
                     color = GREEN
-                if hasattr(self, 'unknown_obstacles') and (row, col) in self.unknown_obstacles:
-                    color = PURPLE  # PURPLE for unknown obstacles
                 
-                pg.draw.rect(self.grid_surface,
+                pg.draw.rect(self.WIN,
                             color,
                             [EPSILON * col + BORDER,
                             EPSILON * row + BORDER,
                             EPSILON - BORDER,
                             EPSILON - BORDER])
-                    
-        self.WIN.blit(self.grid_surface, (0, 0))
-        pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
+    
+    def index2coordinate(self, pos):
+        return (EPSILON * pos[1] + EPSILON / 2, EPSILON * pos[0] + EPSILON / 2)
+    
+    def draw_return_arrow(self, return_matrix):
+        color = GREY
+        h, w = len(return_matrix), len(return_matrix[0])
+        for i in range(h):
+            for j in range(w):
+                if return_matrix[(i, j)][0] == None: continue
+                pg.draw.line(self.WIN, color, self.index2coordinate((i, j)), self.index2coordinate(return_matrix[(i, j)][0]), width=2)
+
+        pg.display.flip()
 
     def illustrate_regions(self, decomposed, region_count):
         self.WIN.fill(BLACK)
@@ -240,49 +214,11 @@ class Grid_Map:
                             EPSILON - BORDER])
 
         pg.display.flip()
-    
-    def illustrate_inner_special_regions(self, special_areas, inner_special_areas):
-        self.WIN.fill(BLACK)
-        pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
-
-        for row in range(len(self.map)):
-            for col in range(len(self.map[0])):
-                color = BLACK
-
-                if self.map[row, col] == 0:
-                    color = WHITE
-
-                pg.draw.rect(self.WIN,
-                            color,
-                            [EPSILON * col + BORDER,
-                            EPSILON * row + BORDER,
-                            EPSILON - BORDER,
-                            EPSILON - BORDER])
-        
-        for region in special_areas:
-            for (row, col) in region.cell_list:
-                pg.draw.rect(self.WIN,
-                            LIGHT_BLUE,
-                            [EPSILON * col + BORDER,
-                            EPSILON * row + BORDER,
-                            EPSILON - BORDER,
-                            EPSILON - BORDER])
-        
-        for region in inner_special_areas:
-            for (row, col) in region.cell_list:
-                pg.draw.rect(self.WIN,
-                            LIGHT_ORANGE,
-                            [EPSILON * col + BORDER,
-                            EPSILON * row + BORDER,
-                            EPSILON - BORDER,
-                            EPSILON - BORDER])
-
-        pg.display.flip()
 
     def draw_path(self, path, color=RED, width=2):
         point_list = [(EPSILON * pos[1] + EPSILON / 2, EPSILON * pos[0] + EPSILON / 2) for pos in path]
         if len(point_list) > 1:
-            pg.draw.lines(self.WIN, color, False, point_list, width=2)
+            pg.draw.lines(self.WIN, color, False, point_list, width=3)
 
     def update_battery_pos(self, pos):
         self.battery_pos = pos
@@ -291,25 +227,15 @@ class Grid_Map:
     
     def update_vehicle_pos(self, pos):
         self.vehicle_pos = pos
-        # self.vehicle_img.x = EPSILON * pos[1] + BORDER
-        # self.vehicle_img.y = EPSILON * pos[0] + BORDER
+        self.vehicle_img.x = EPSILON * pos[1] + BORDER
+        self.vehicle_img.y = EPSILON * pos[0] + BORDER
 
     def task(self, pos):
         self.map[pos] = 'e'
 
-        color = GREEN
-        row, col = pos
-        pg.draw.rect(self.grid_surface, 
-            color,
-            [EPSILON * col + BORDER,
-            EPSILON * row + BORDER,
-            EPSILON - BORDER,
-            EPSILON - BORDER])
-
     def move_to(self, pos):
         if self.move_status != 0:
             self.trajectories[-1].append(self.vehicle_pos)
-            pass
         self.move_status = 0
         self.update_vehicle_pos(pos)
         self.trajectories[-1].append(pos)
@@ -323,7 +249,6 @@ class Grid_Map:
     def move_advance(self, pos):
         if self.move_status != 3:
             self.trajectories.append([])
-            pass
         self.move_status = 3
         self.update_vehicle_pos(pos)
     
@@ -333,29 +258,24 @@ class Grid_Map:
     def set_energy_display(self, energy):
         self.energy_display = round(energy, 2)
 
-    def set_robot_callback(self, callback):
-        """Set callback function to notify robot of new obstacles"""
-        self.robot_callback = callback
-
-    def add_unknown_obstacle(self, pos):
-        """Add unknown obstacle at runtime"""
-        if hasattr(self, 'unknown_obstacles'):
-            self.unknown_obstacles.add(pos)
-
     def check_valid_pos(self, pos):
         row, col = pos
         if row < 0 or row >= self.row_count: return False
         if col < 0 or col >= self.col_count: return False
         return True
 
+ui = Grid_Map()
+ui.read_map('map/empty_map.txt')
+ENVIRONMENT, battery_pos = ui.edit_map()
 
-def main():
-    ui = Grid_Map()
-    ui.read_map('map/tmp2.txt')
-    ui.edit_map()
-    pg.image.save(ui.WIN, 'tmp/screenshot.png')
+ROW_COUNT = len(ENVIRONMENT)
+COL_COUNT = len(ENVIRONMENT[0])
 
-    pg.quit()
+# Pre-calculate return path to charge station from each cell in ENVIRONMENT
+from optimization import return_path_matrix, get_return_path
+return_matrix = return_path_matrix(ENVIRONMENT, battery_pos)
 
-if __name__ == "__main__":
-    main()
+ui.draw()
+ui.draw_return_arrow(return_matrix)
+pg.image.save(ui.WIN, 'tmp/screenshot.png')
+input()
