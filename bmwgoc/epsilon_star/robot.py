@@ -171,7 +171,7 @@ class EpsilonStarPlusRobot:
     def run_step(self) -> Dict:
         """Execute one step of ε⋆+ algorithm"""
         if self.etm.is_coverage_complete():
-            return {'status': 'complete', 'action': 'none'}
+            return {'status': 'complete', 'action': 'none', 'position': self.current_pos.tuple}
 
         # Get waypoint with sensor discovery
         waypoints = self.etm.get_waypoint(self.current_pos, self.true_environment_array)
@@ -181,13 +181,13 @@ class EpsilonStarPlusRobot:
         self._sync_discovered_obstacles()
 
         if not waypoints:
-            return {'status': 'no_waypoint', 'action': 'none'}
+            return {'status': 'no_waypoint', 'action': 'none', 'position': self.current_pos.tuple}
 
         # Select waypoint
         selected_wp = self._select_waypoint(waypoints)
 
         if self._is_obstacle_position(selected_wp):
-            return {'status': 'blocked', 'action': 'none'}
+            return {'status': 'blocked', 'action': 'none', 'position': self.current_pos.tuple}
 
         if selected_wp == self.current_pos:
             return self._perform_task()
@@ -267,6 +267,7 @@ class EpsilonStarPlusRobot:
         return {
             'status': 'energy_cycle_complete',
             'action': 'energy_cycle',
+            'position': self.current_pos.tuple,
             'retreat_info': retreat_info,
             'advance_info': advance_info
         }
@@ -380,7 +381,7 @@ class EpsilonStarPlusRobot:
     def _move_to(self, new_pos: Position) -> Dict:
         """Move robot to new position"""
         if self._is_obstacle_position(new_pos):
-            return {'status': 'blocked', 'action': 'blocked_move'}
+            return {'status': 'blocked', 'action': 'blocked_move', 'position': self.current_pos.tuple}
 
         # Calculate and consume energy
         energy_cost = self._calculate_move_energy(new_pos)
@@ -447,9 +448,17 @@ class EpsilonStarPlusRobot:
             if self.ui_reference:
                 self.ui_reference.task(pos_tuple)
 
-            return {'status': 'task_completed', 'action': 'task'}
+            return {
+                'status': 'task_completed',
+                'action': 'task',
+                'position': self.current_pos.tuple
+            }
         else:
-            return {'status': 'task_failed', 'action': 'task_out_of_range'}
+            return {
+                'status': 'task_failed',
+                'action': 'task_out_of_range',
+                'position': self.current_pos.tuple
+            }
 
     def get_statistics(self) -> Dict:
         """Get comprehensive algorithm statistics"""

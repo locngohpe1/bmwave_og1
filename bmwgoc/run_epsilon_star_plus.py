@@ -6,8 +6,7 @@ run_sensor_epsilon_star_plus.py - SENSOR-BASED ε⋆+ ALGORITHM ENTRY POINT
 Usage:
     cd bmwgoc/
     python run_sensor_epsilon_star_plus.py
-    python run_sensor_epsi    def neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-lon_star_plus.py --map map/real_map/denmark.txt --sensor-range 2.5
+    python run_sensor_epsilon_star_plus.py --map map/real_map/denmark.txt --sensor-range 2.5
 """
 
 import sys

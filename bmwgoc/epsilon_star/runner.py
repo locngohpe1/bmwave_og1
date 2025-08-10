@@ -1,6 +1,6 @@
 """
 runner.py - ε⋆+ Algorithm Runner
-100% Paper Compliant Implementation
+100% Paper Compliant Implementation với Sensor Visualization
 """
 
 import numpy as np
@@ -17,7 +17,7 @@ from .robot import EpsilonStarPlusRobot
 
 
 class EpsilonStarPlusRunner:
-    """ε⋆+ Algorithm Runner with UI Integration"""
+    """ε⋆+ Algorithm Runner with Enhanced Sensor Visualization"""
 
     def __init__(self, map_file: str = "map/real_map/denmark.txt", sensor_range: float = 2.0):
         self.ui = Grid_Map()
@@ -68,8 +68,10 @@ class EpsilonStarPlusRunner:
         self.step_count = 0
         self.start_time = None
 
-        # Visualization
+        # Visualization settings
         self.show_sensor_range = True
+        self.show_discovered_obstacles = True
+        self.show_stats_overlay = True
 
     def run(self):
         """Main execution loop"""
@@ -95,7 +97,7 @@ class EpsilonStarPlusRunner:
                 self.step_count += 1
                 self._process_step_info(step_info)
 
-                if self.step_count % 100 == 0:
+                if self.step_count % 50 == 0:
                     self._print_progress()
             else:
                 self._print_final_results()
@@ -115,59 +117,132 @@ class EpsilonStarPlusRunner:
             self.speed = min(120, self.speed + 10)
         elif key == pg.K_s:
             self._save_screenshot()
-        elif key == pg.K_t:
+        elif key == pg.K_r:
             self.show_sensor_range = not self.show_sensor_range
+        elif key == pg.K_o:
+            self.show_discovered_obstacles = not self.show_discovered_obstacles
+        elif key == pg.K_i:
+            self.show_stats_overlay = not self.show_stats_overlay
 
         return True
 
     def _process_step_info(self, step_info: Dict):
-        """Process step information"""
+        """Process step information with safe position handling"""
         action = step_info.get('action', 'none')
 
         if action == 'move':
-            pos = step_info['position']
-            segment = step_info['segment']
+            pos = step_info.get('position')
+            if pos:
+                segment = step_info.get('segment', 'coverage')
 
-            if segment == 'coverage':
-                self.ui.move_to(pos)
-            elif segment == 'retreat':
-                self.ui.move_retreat(pos)
-            elif segment == 'advance':
-                self.ui.move_advance(pos)
+                if segment == 'coverage':
+                    self.ui.move_to(pos)
+                elif segment == 'retreat':
+                    self.ui.move_retreat(pos)
+                elif segment == 'advance':
+                    self.ui.move_advance(pos)
 
         elif action == 'task':
-            pos = step_info['position']
-            self.ui.task(pos)
+            pos = step_info.get('position')
+            if pos:
+                self.ui.task(pos)
+            else:
+                # Fallback: use current robot position
+                self.ui.task(self.robot.current_pos.tuple)
 
+        # Update energy display
         if hasattr(self.ui, 'set_energy_display'):
             self.ui.set_energy_display(self.robot.energy)
 
     def _update_ui(self):
-        """Update UI with visualization"""
+        """Update UI with enhanced visualizations"""
         self.ui.draw()
 
+        # Draw sensor range
         if self.show_sensor_range:
             self._draw_sensor_range()
 
+        # Draw discovered obstacles
+        if self.show_discovered_obstacles:
+            self._draw_discovered_obstacles()
+
+        # Draw stats overlay
+        if self.show_stats_overlay:
+            self._draw_stats_overlay()
+
+        pg.display.flip()
+
     def _draw_sensor_range(self):
-        """Draw sensor detection range"""
+        """Draw sensor detection range với enhanced visual"""
         robot_pixel_pos = (
             (self.robot.current_pos.col + 0.5) * 8,
             (self.robot.current_pos.row + 0.5) * 8
         )
 
         sensor_radius_pixels = self.sensor_range * 8
+
+        # Draw sensor range circle (outline)
+        pg.draw.circle(self.ui.WIN, (0, 255, 255),
+                      (int(robot_pixel_pos[0]), int(robot_pixel_pos[1])),
+                      int(sensor_radius_pixels), 2)
+
+        # Draw semi-transparent sensor area
         sensor_surface = pg.Surface((sensor_radius_pixels * 2, sensor_radius_pixels * 2))
-        sensor_surface.set_alpha(64)
+        sensor_surface.set_alpha(32)
         sensor_surface.fill((0, 255, 255))
 
+        # Create circular mask
         pg.draw.circle(sensor_surface, (0, 255, 255),
                       (int(sensor_radius_pixels), int(sensor_radius_pixels)),
-                      int(sensor_radius_pixels), 2)
+                      int(sensor_radius_pixels))
 
         self.ui.WIN.blit(sensor_surface,
                         (robot_pixel_pos[0] - sensor_radius_pixels,
                          robot_pixel_pos[1] - sensor_radius_pixels))
+
+        # Draw center dot
+        pg.draw.circle(self.ui.WIN, (255, 255, 0),
+                      (int(robot_pixel_pos[0]), int(robot_pixel_pos[1])), 3)
+
+    def _draw_discovered_obstacles(self):
+        """Draw discovered obstacles với different color"""
+        for obstacle_pos in self.robot.etm.discovered_obstacles:
+            pos_tuple = obstacle_pos.tuple
+            if (0 <= pos_tuple[0] < self.robot.rows and
+                0 <= pos_tuple[1] < self.robot.cols):
+
+                # Draw discovered obstacle marker
+                pixel_x = pos_tuple[1] * 8 + 2
+                pixel_y = pos_tuple[0] * 8 + 2
+
+                pg.draw.rect(self.ui.WIN, (255, 100, 100),
+                           (pixel_x, pixel_y, 4, 4))
+
+    def _draw_stats_overlay(self):
+        """Draw real-time statistics overlay"""
+        stats = self.robot.get_statistics()
+        font = pg.font.SysFont(None, 24)
+
+        # Create semi-transparent background
+        overlay_surface = pg.Surface((300, 120))
+        overlay_surface.set_alpha(180)
+        overlay_surface.fill((0, 0, 0))
+        self.ui.WIN.blit(overlay_surface, (10, 10))
+
+        # Display key statistics
+        y_offset = 15
+        texts = [
+            f"Step: {self.step_count}",
+            f"Coverage: {stats['coverage_percentage']:.1f}%",
+            f"Energy: {self.robot.energy:.0f}/{self.energy_config.capacity}",
+            f"Returns: {stats['return_count']}",
+            f"Discovered: {stats['total_discovered_obstacles']} obstacles"
+        ]
+
+        for text in texts:
+            text_surface = font.render(text, True, (255, 255, 255))
+            self.ui.WIN.blit(text_surface, (15, y_offset))
+            y_offset += 20
 
     def _print_progress(self):
         """Print progress statistics"""
@@ -181,8 +256,7 @@ class EpsilonStarPlusRunner:
               f"Returns: {stats['return_count']:2d} | " 
               f"Energy: {self.robot.energy:6.1f} | "
               f"Discovered: {sensor_stats['total_discovered_obstacles']:3d} | "
-              f"ETM: {etm_state} | "
-              f"Time: {elapsed:6.1f}s")
+              f"ETM: {etm_state}")
 
     def _print_final_results(self):
         """Print final algorithm results"""
@@ -238,7 +312,7 @@ class EpsilonStarPlusRunner:
             self._results_printed = True
 
     def _save_screenshot(self):
-        """Save screenshot"""
+        """Save screenshot with timestamp"""
         timestamp = int(time.time())
         filename = f"epsilon_star_plus_{timestamp}.png"
         pg.image.save(self.ui.WIN, filename)
@@ -261,6 +335,14 @@ class EpsilonStarPlusRunner:
             'obstacles_discovered': sensor_stats['total_discovered_obstacles'],
             'sensor_activations': stats['sensor_activations']
         }
+
+
+def run_quick_demo():
+    """Quick demo function"""
+    runner = EpsilonStarPlusRunner("map/real_map/denmark.txt", sensor_range=2.0)
+    runner.run()
+
+
 def main():
     """Main function for ε⋆+ algorithm"""
     import argparse
@@ -273,7 +355,30 @@ def main():
                        default=2.0,
                        help='Sensor detection range Rs')
     args = parser.parse_args()
+
+    print("🚀 LAUNCHING SENSOR-BASED ε⋆+ ALGORITHM")
+    print("="*50)
+    print("📚 Based on:")
+    print("   • Song & Gupta (2018) - ε⋆ Algorithm")
+    print("   • Shen et al. (2020) - ε⋆+ Extension")
+    print("🔧 Implementation:")
+    print("   • Progressive obstacle discovery via sensors")
+    print("   • Real-time MAPS updates based on sensor feedback")
+    print("   • Unknown environment assumption")
+    print(f"   • Sensor range Rs: {args.sensor_range}")
+    print("   • 100% Paper Compliant")
+    print("🎮 CONTROLS:")
+    print("   • SPACE: Pause/Resume")
+    print("   • LEFT/RIGHT: Speed control")
+    print("   • R: Toggle sensor range display")
+    print("   • O: Toggle discovered obstacles")
+    print("   • I: Toggle info overlay")
+    print("   • S: Save screenshot")
+    print("="*50)
+
     runner = EpsilonStarPlusRunner(args.map, args.sensor_range)
     runner.run()
+
+
 if __name__ == "__main__":
     main()
