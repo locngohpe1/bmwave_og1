@@ -1,8 +1,3 @@
-"""
-runner.py - ε⋆+ Algorithm Runner
-100% Paper Compliant Implementation với Sensor Visualization
-"""
-
 import numpy as np
 import pygame as pg
 import time
@@ -17,9 +12,9 @@ from .robot import EpsilonStarPlusRobot
 
 
 class EpsilonStarPlusRunner:
-    """ε⋆+ Algorithm Runner with Enhanced Sensor Visualization"""
+    """ε⋆+ Algorithm Runner with Enhanced Unknown Obstacle Support"""
 
-    def __init__(self, map_file: str = "map/real_map/denmark.txt", sensor_range: float = 2.0):
+    def __init__(self, map_file: str = "map/experiment/map_qlearning/mapqlearning_001.txt", sensor_range: float = 2.0):
         self.ui = Grid_Map()
         pg.init()
 
@@ -32,9 +27,13 @@ class EpsilonStarPlusRunner:
         self.ui.row_count = len(true_environment)
         self.ui.col_count = len(true_environment[0])
 
-        # Interactive setup
+        # Interactive setup với unknown obstacles support
         final_environment, final_battery_pos = self.ui.edit_map()
-        self.true_environment_array = np.array(final_environment)
+
+        # ✅ NEW: Get combined environment including unknown obstacles
+        self.static_environment_array = np.array(final_environment)  # Static walls only
+        self.combined_environment_array = self._create_combined_environment()  # Static + Unknown
+
         self.battery_pos = Position(final_battery_pos[0], final_battery_pos[1])
 
         # Sensor configuration
@@ -42,7 +41,7 @@ class EpsilonStarPlusRunner:
 
         # Energy configuration per Shen et al. (2020)
         self.energy_config = EnergyConfig(
-            capacity=1000.0,
+            capacity=100.0,
             coverage_rate=2.0,
             advance_rate=1.0,
             retreat_rate=1.0
@@ -51,20 +50,20 @@ class EpsilonStarPlusRunner:
         # Create robot
         self.robot = EpsilonStarPlusRobot(
             self.battery_pos,
-            len(self.true_environment_array),
-            len(self.true_environment_array[0]),
+            len(self.combined_environment_array),
+            len(self.combined_environment_array[0]),
             self.energy_config,
             sensor_range=self.sensor_range
         )
 
-        # Set robot knowledge
-        self.robot.set_static_map(self.true_environment_array)
-        self.robot.set_environment(self.true_environment_array)
+        # ✅ UPDATED: Set robot knowledge
+        self.robot.set_static_map(self.static_environment_array)  # Only static walls
+        self.robot.set_environment(self.combined_environment_array)  # Static + Unknown for discovery
         self.robot.ui_reference = self.ui
 
         # Control variables
         self.paused = False
-        self.speed = 60
+        self.speed = 40
         self.step_count = 0
         self.start_time = None
 
@@ -72,12 +71,37 @@ class EpsilonStarPlusRunner:
         self.show_sensor_range = True
         self.show_discovered_obstacles = True
         self.show_stats_overlay = True
+        self.show_unknown_obstacles = True  # ✅ NEW
+
+        # Statistics tracking
+        self.unknown_obstacles_count = len(self.ui.unknown_obstacles)
+
+    def _create_combined_environment(self) -> np.ndarray:
+        """✅ NEW: Create combined environment including unknown obstacles"""
+        combined = self.static_environment_array.copy()
+
+        # Add unknown obstacles (value 2) to environment
+        for row, col in self.ui.unknown_obstacles:
+            if 0 <= row < len(combined) and 0 <= col < len(combined[0]):
+                combined[row, col] = 1  # Robot sees all obstacles as value 1
+
+        return combined
 
     def run(self):
         """Main execution loop"""
         clock = pg.time.Clock()
         running = True
         self.start_time = time.time()
+
+        print(f"🟣 Starting with {self.unknown_obstacles_count} unknown obstacles")
+        print("🎮 CONTROLS:")
+        print("   • SPACE: Pause/Resume")
+        print("   • LEFT/RIGHT: Speed control")
+        print("   • R: Toggle sensor range display")
+        print("   • O: Toggle discovered obstacles")
+        print("   • U: Toggle unknown obstacles display")
+        print("   • I: Toggle info overlay")
+        print("   • S: Save screenshot")
 
         while running:
             for event in pg.event.get():
@@ -121,6 +145,8 @@ class EpsilonStarPlusRunner:
             self.show_sensor_range = not self.show_sensor_range
         elif key == pg.K_o:
             self.show_discovered_obstacles = not self.show_discovered_obstacles
+        elif key == pg.K_u:  # ✅ NEW: Toggle unknown obstacles
+            self.show_unknown_obstacles = not self.show_unknown_obstacles
         elif key == pg.K_i:
             self.show_stats_overlay = not self.show_stats_overlay
 
@@ -165,6 +191,10 @@ class EpsilonStarPlusRunner:
         # Draw discovered obstacles
         if self.show_discovered_obstacles:
             self._draw_discovered_obstacles()
+
+        # ✅ Draw unknown obstacles (if not discovered yet)
+        if self.show_unknown_obstacles:
+            self._draw_undiscovered_unknown_obstacles()
 
         # Draw stats overlay
         if self.show_stats_overlay:
@@ -218,25 +248,44 @@ class EpsilonStarPlusRunner:
                 pg.draw.rect(self.ui.WIN, (255, 100, 100),
                            (pixel_x, pixel_y, 4, 4))
 
+    def _draw_undiscovered_unknown_obstacles(self):
+        """✅ NEW: Draw unknown obstacles that haven't been discovered yet"""
+        discovered_positions = {obs.tuple for obs in self.robot.etm.discovered_obstacles}
+
+        for row, col in self.ui.unknown_obstacles:
+            # Only draw if not yet discovered
+            if (row, col) not in discovered_positions:
+                pixel_x = col * 8 + 1
+                pixel_y = row * 8 + 1
+
+                # Draw purple outline to indicate unknown status
+                pg.draw.rect(self.ui.WIN, (128, 0, 128),
+                           (pixel_x, pixel_y, 6, 6), 2)
+
     def _draw_stats_overlay(self):
-        """Draw real-time statistics overlay"""
+        """Draw enhanced real-time statistics overlay"""
         stats = self.robot.get_statistics()
+        sensor_stats = self.robot.etm.get_sensor_statistics()
         font = pg.font.SysFont(None, 24)
 
         # Create semi-transparent background
-        overlay_surface = pg.Surface((300, 120))
+        overlay_surface = pg.Surface((320, 140))
         overlay_surface.set_alpha(180)
         overlay_surface.fill((0, 0, 0))
         self.ui.WIN.blit(overlay_surface, (10, 10))
 
         # Display key statistics
         y_offset = 15
+        discovered_unknown = len([pos for pos in self.ui.unknown_obstacles
+                                if Position(pos[0], pos[1]) in self.robot.etm.discovered_obstacles])
+
         texts = [
             f"Step: {self.step_count}",
             f"Coverage: {stats['coverage_percentage']:.1f}%",
             f"Energy: {self.robot.energy:.0f}/{self.energy_config.capacity}",
             f"Returns: {stats['return_count']}",
-            f"Discovered: {stats['total_discovered_obstacles']} obstacles"
+            f"Discovered: {sensor_stats['total_discovered_obstacles']} obstacles",
+            f"Unknown Found: {discovered_unknown}/{self.unknown_obstacles_count}"
         ]
 
         for text in texts:
@@ -245,44 +294,55 @@ class EpsilonStarPlusRunner:
             y_offset += 20
 
     def _print_progress(self):
-        """Print progress statistics"""
+        """Print enhanced progress statistics"""
         stats = self.robot.get_statistics()
         sensor_stats = self.robot.etm.get_sensor_statistics()
         elapsed = time.time() - self.start_time
         etm_state = self.robot.etm.get_state().value
+
+        discovered_unknown = len([pos for pos in self.ui.unknown_obstacles
+                                if Position(pos[0], pos[1]) in self.robot.etm.discovered_obstacles])
 
         print(f"Step {self.step_count:4d} | "
               f"Coverage: {stats['coverage_percentage']:5.1f}% | "
               f"Returns: {stats['return_count']:2d} | " 
               f"Energy: {self.robot.energy:6.1f} | "
               f"Discovered: {sensor_stats['total_discovered_obstacles']:3d} | "
+              f"Unknown: {discovered_unknown}/{self.unknown_obstacles_count} | "
               f"ETM: {etm_state}")
 
     def _print_final_results(self):
-        """Print final algorithm results"""
+        """Print enhanced final algorithm results"""
         if not hasattr(self, '_results_printed'):
             execution_time = time.time() - self.start_time if self.start_time else 0
             stats = self.robot.get_statistics()
             sensor_stats = self.robot.etm.get_sensor_statistics()
 
             print("\n" + "=" * 60)
-            print("ε⋆+ ALGORITHM - FINAL RESULTS")
+            print("ε⋆+ ALGORITHM - ENHANCED FINAL RESULTS")
             print("=" * 60)
 
             print("ROBOT CONFIGURATION:")
             print(f"  Starting position:   {self.battery_pos.tuple}")
-            print(f"  Map dimensions:      {self.true_environment_array.shape}")
+            print(f"  Map dimensions:      {self.combined_environment_array.shape}")
             print(f"  Sensor range Rs:     {self.sensor_range}")
             print(f"  Energy capacity:     {self.energy_config.capacity}")
 
-            print("SENSOR DISCOVERY:")
-            print(f"  Obstacles discovered: {sensor_stats['total_discovered_obstacles']}")
+            print("OBSTACLE DISCOVERY:")
+            print(f"  Static obstacles:     {np.sum(self.static_environment_array == 1)}")
+            print(f"  Unknown obstacles:    {self.unknown_obstacles_count}")
+
+            discovered_unknown = len([pos for pos in self.ui.unknown_obstacles
+                                    if Position(pos[0], pos[1]) in self.robot.etm.discovered_obstacles])
+            unknown_discovery_rate = (discovered_unknown / self.unknown_obstacles_count * 100) if self.unknown_obstacles_count > 0 else 0
+
+            print(f"  Unknown discovered:   {discovered_unknown}/{self.unknown_obstacles_count} ({unknown_discovery_rate:.1f}%)")
+            print(f"  Total discovered:     {sensor_stats['total_discovered_obstacles']}")
             print(f"  Sensor activations:   {stats['sensor_activations']}")
 
-            true_obstacles = np.sum(self.true_environment_array == 1)
-            discovery_rate = (sensor_stats['total_discovered_obstacles'] / true_obstacles * 100) if true_obstacles > 0 else 0
-            print(f"  True obstacles:       {true_obstacles}")
-            print(f"  Discovery rate:       {discovery_rate:.1f}%")
+            total_obstacles = np.sum(self.combined_environment_array == 1)
+            overall_discovery_rate = (sensor_stats['total_discovered_obstacles'] / total_obstacles * 100) if total_obstacles > 0 else 0
+            print(f"  Overall discovery:    {overall_discovery_rate:.1f}%")
 
             print("PATH STATISTICS:")
             print(f"  Coverage length:     {stats['coverage_length']:.2f}")
@@ -314,16 +374,21 @@ class EpsilonStarPlusRunner:
     def _save_screenshot(self):
         """Save screenshot with timestamp"""
         timestamp = int(time.time())
-        filename = f"epsilon_star_plus_{timestamp}.png"
+        filename = f"epsilon_star_plus_enhanced_{timestamp}.png"
         pg.image.save(self.ui.WIN, filename)
+        print(f"📸 Screenshot saved: {filename}")
 
     def get_statistics_summary(self) -> Dict:
-        """Get summary statistics"""
+        """Get enhanced summary statistics"""
         stats = self.robot.get_statistics()
         sensor_stats = self.robot.etm.get_sensor_statistics()
         execution_time = time.time() - self.start_time if self.start_time else 0
+
+        discovered_unknown = len([pos for pos in self.ui.unknown_obstacles
+                                if Position(pos[0], pos[1]) in self.robot.etm.discovered_obstacles])
+
         return {
-            'algorithm': 'ε⋆+',
+            'algorithm': 'ε⋆+ Enhanced',
             'battery_position': self.battery_pos.tuple,
             'sensor_range': self.sensor_range,
             'total_path_length': stats['total_path_length'],
@@ -333,48 +398,48 @@ class EpsilonStarPlusRunner:
             'execution_time': execution_time,
             'coverage_percentage': stats['coverage_percentage'],
             'obstacles_discovered': sensor_stats['total_discovered_obstacles'],
+            'unknown_obstacles_placed': self.unknown_obstacles_count,
+            'unknown_obstacles_discovered': discovered_unknown,
             'sensor_activations': stats['sensor_activations']
         }
 
 
 def run_quick_demo():
     """Quick demo function"""
-    runner = EpsilonStarPlusRunner("map/real_map/denmark.txt", sensor_range=2.0)
+    runner = EpsilonStarPlusRunner("map/experiment/map_qlearning/mapqlearning_002.txt", sensor_range=2.0)
     runner.run()
 
 
 def main():
-    """Main function for ε⋆+ algorithm"""
+    """Main function for Enhanced ε⋆+ algorithm"""
     import argparse
 
-    parser = argparse.ArgumentParser(description='ε⋆+ Algorithm Runner')
+    parser = argparse.ArgumentParser(description='Enhanced ε⋆+ Algorithm Runner')
     parser.add_argument('--map', '-m', type=str,
-                       default="map/real_map/denmark.txt",
+                       default="map/experiment/map_qlearning/mapqlearning_003.txt",
                        help='Path to map file')
     parser.add_argument('--sensor-range', '-s', type=float,
                        default=2.0,
                        help='Sensor detection range Rs')
     args = parser.parse_args()
 
-    print("🚀 LAUNCHING SENSOR-BASED ε⋆+ ALGORITHM")
-    print("="*50)
+    print("🚀 LAUNCHING ENHANCED SENSOR-BASED ε⋆+ ALGORITHM")
+    print("="*55)
     print("📚 Based on:")
     print("   • Song & Gupta (2018) - ε⋆ Algorithm")
     print("   • Shen et al. (2020) - ε⋆+ Extension")
-    print("🔧 Implementation:")
+    print("🔧 Enhanced Implementation:")
     print("   • Progressive obstacle discovery via sensors")
     print("   • Real-time MAPS updates based on sensor feedback")
     print("   • Unknown environment assumption")
+    print("   • Interactive unknown obstacle placement")
     print(f"   • Sensor range Rs: {args.sensor_range}")
-    print("   • 100% Paper Compliant")
-    print("🎮 CONTROLS:")
-    print("   • SPACE: Pause/Resume")
-    print("   • LEFT/RIGHT: Speed control")
-    print("   • R: Toggle sensor range display")
-    print("   • O: Toggle discovered obstacles")
-    print("   • I: Toggle info overlay")
-    print("   • S: Save screenshot")
-    print("="*50)
+    print("   • 100% Paper Compliant + Enhancements")
+    print("🟣 NEW FEATURES:")
+    print("   • Shift+Click to place unknown obstacles")
+    print("   • Enhanced discovery tracking")
+    print("   • Unknown obstacle visualization")
+    print("="*55)
 
     runner = EpsilonStarPlusRunner(args.map, args.sensor_range)
     runner.run()

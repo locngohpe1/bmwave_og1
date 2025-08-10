@@ -15,9 +15,10 @@ BLUE = (5, 16, 148)
 LIGHT_BLUE = (0, 191, 255)
 BROWN = (76, 1, 33)
 LIGHT_ORANGE = (255, 140, 0)
+PURPLE = (128, 0, 128)  # ✅ NEW: Color for unknown obstacles
 
 # epsilon value (size of cell)
-EPSILON = 8
+EPSILON = 50
 
 BORDER = 1
 INFO_BAR_HEIGHT = 30
@@ -34,23 +35,21 @@ def hsv2rgb(h, s, v):
 
 def getDistinctColors(n):
     huePartition = 1.0 / (n + 1)
-    # return [hsv2rgb(huePartition * value, 1.0, 1.0) for value in range(0, n)]
     return [LIGHT_BLUE] * n
 
 
 class Grid_Map:
     def __init__(self):
-        # pg.init()
         pg.display.set_caption("ε⋆+ Coverage Path Planning")
         self.WIN = None
         self.grid_surface = None
 
-        # ✅ FIXED: Initialize map as None, will be set properly later
+        # Initialize map as None, will be set properly later
         self.map = None
         self.row_count = 0
         self.col_count = 0
 
-        # ✅ FIXED: Battery position will be set by user interaction
+        # Battery position will be set by user interaction
         self.battery_pos = (0, 0)
         self.vehicle_pos = (0, 0)
 
@@ -63,6 +62,9 @@ class Grid_Map:
 
         self.info_bar = None
         self.energy_display = 0
+
+        # ✅ NEW: Track unknown obstacles
+        self.unknown_obstacles = set()  # Store positions of unknown obstacles
 
     def read_map(self, filepath):
         """Read map file và return environment + default battery position"""
@@ -84,35 +86,38 @@ class Grid_Map:
             if len(map_list) == 0:
                 map_list = [[0 for _ in range(self.col_count)] for _ in range(self.row_count)]
 
-            # ✅ FIXED: Always convert to numpy array immediately
+            # Always convert to numpy array immediately
             self.map = np.array(map_list, dtype=object)
 
-        # ✅ NOTE: This returns DEFAULT battery_pos, will be updated in edit_map()
         return copy.deepcopy(map_list), self.battery_pos
 
     def edit_map(self):
         """
-        🔧 FIXED: Interactive map editing với proper battery position return
-        Left click: Place/remove obstacles
+        🔧 ENHANCED: Interactive map editing với Shift+Click Unknown Obstacles
+        Left click: Place/remove static obstacles (black)
+        Shift+Left click: Place/remove unknown obstacles (purple)
         Right click: Set charging station
         Any key: Start algorithm
 
         Returns: (final_environment, final_battery_position)
         """
-        print("\n🎮 INTERACTIVE SETUP MODE:")
-        print("• Left click: Place/remove obstacles")
+        print("\n🎮 ENHANCED INTERACTIVE SETUP MODE:")
+        print("• Left click: Place/remove STATIC obstacles (black)")
+        print("• Shift+Left click: Place/remove UNKNOWN obstacles (purple)")
         print("• Right click: Set charging station (IMPORTANT!)")
         print("• Press any key when ready to start algorithm")
         print("\n⚠️  MUST set charging station before starting!")
+        print("🆕 UNKNOWN OBSTACLES: Robot will discover these via sensors!")
 
-        # ✅ FIXED: Initialize with proper numpy array if not exists
+        # Initialize with proper numpy array if not exists
         if self.map is None:
             self.map = np.zeros((self.row_count, self.col_count), dtype=object)
 
         done = False
         draw_obstacle = False
+        draw_unknown_obstacle = False
         prev_cell = None
-        battery_set = False  # Track if battery position was set
+        battery_set = False
 
         while done == False:
             pos = pg.mouse.get_pos()
@@ -127,16 +132,24 @@ class Grid_Map:
                         print("⚠️  WARNING: No charging station set! Using default (0,0)")
                         print("   Please set charging station with RIGHT CLICK first!")
                         continue
-                    done = True  # ✅ Start algorithm on any keypress
+                    done = True  # Start algorithm on any keypress
                 elif event.type == pg.MOUSEBUTTONDOWN:
                     mouse_pressed = pg.mouse.get_pressed()
-                    if mouse_pressed[0]:  # left mouse click: obstacle
-                        draw_obstacle = True
+                    keys = pg.key.get_pressed()
+
+                    if mouse_pressed[0]:  # left mouse click
+                        if keys[pg.K_LSHIFT] or keys[pg.K_RSHIFT]:  # ✅ Shift+Left: Unknown obstacle
+                            draw_unknown_obstacle = True
+                            print(f"🟣 Placing unknown obstacle mode")
+                        else:  # Normal Left: Static obstacle
+                            draw_obstacle = True
+                            print(f"⚫ Placing static obstacle mode")
+
                     if mouse_pressed[2]:  # right mouse click: charging station
                         if self.check_valid_pos((row, col)) == False:
                             continue
 
-                        # ✅ FIXED: Update battery position properly
+                        # Update battery position properly
                         self.update_battery_pos((row, col))
                         self.trajectories[0] = [(row, col)]
 
@@ -146,41 +159,69 @@ class Grid_Map:
                         else:
                             self.map[row][col] = 0
 
+                        # Remove from unknown obstacles if exists
+                        self.unknown_obstacles.discard((row, col))
+
                         battery_set = True
                         print(f"🔋 Charging station set at: ({row}, {col})")
 
                 elif event.type == pg.MOUSEBUTTONUP:
                     draw_obstacle = False
+                    draw_unknown_obstacle = False
                     prev_cell = None
 
-            # check boolean flag to allow holding left click to draw
-            if draw_obstacle:
-                if self.check_valid_pos((row, col)) == False:
-                    continue
-                if (prev_cell != (row, col)):
+            # Handle drawing modes
+            if (draw_obstacle or draw_unknown_obstacle) and self.check_valid_pos((row, col)):
+                if prev_cell != (row, col):
                     prev_cell = (row, col)
-                    current_val = self.map[row, col] if isinstance(self.map, np.ndarray) else self.map[row][col]
-                    if current_val == 0 and self.battery_pos != (row, col):
-                        if isinstance(self.map, np.ndarray):
-                            self.map[row, col] = 1
-                        else:
-                            self.map[row][col] = 1
-                    else:
-                        if isinstance(self.map, np.ndarray):
-                            self.map[row, col] = 0
-                        else:
-                            self.map[row][col] = 0
 
-            # pygame draw
+                    if draw_unknown_obstacle:  # ✅ Shift+Click: Unknown obstacles
+                        if (row, col) != self.battery_pos:
+                            if (row, col) in self.unknown_obstacles:
+                                # Remove unknown obstacle
+                                self.unknown_obstacles.remove((row, col))
+                                if isinstance(self.map, np.ndarray):
+                                    self.map[row, col] = 0
+                                else:
+                                    self.map[row][col] = 0
+                                print(f"🟣 Removed unknown obstacle at ({row}, {col})")
+                            else:
+                                # Add unknown obstacle
+                                self.unknown_obstacles.add((row, col))
+                                if isinstance(self.map, np.ndarray):
+                                    self.map[row, col] = 2  # ✅ NEW: Value 2 for unknown obstacles
+                                else:
+                                    self.map[row][col] = 2
+                                print(f"🟣 Added unknown obstacle at ({row}, {col})")
+
+                    elif draw_obstacle:  # Normal click: Static obstacles
+                        current_val = self.map[row, col] if isinstance(self.map, np.ndarray) else self.map[row][col]
+                        if current_val == 0 and self.battery_pos != (row, col):
+                            if isinstance(self.map, np.ndarray):
+                                self.map[row, col] = 1  # Static obstacle
+                            else:
+                                self.map[row][col] = 1
+                            # Remove from unknown obstacles if was there
+                            self.unknown_obstacles.discard((row, col))
+                        else:
+                            if isinstance(self.map, np.ndarray):
+                                self.map[row, col] = 0
+                            else:
+                                self.map[row][col] = 0
+                            # Remove from unknown obstacles
+                            self.unknown_obstacles.discard((row, col))
+
+            # Draw everything
             self.draw_map()
+            self._draw_unknown_obstacles()  # ✅ Draw purple obstacles
             pg.draw.rect(self.WIN, YELLOW, self.battery_img)
 
             # Show status
             if battery_set:
-                status_text = f"Battery: {self.battery_pos} - Press any key to start"
+                status_text = f"Battery: {self.battery_pos} | Unknown: {len(self.unknown_obstacles)} - Press any key to start"
                 color = GREEN
             else:
-                status_text = "Right-click to set charging station"
+                status_text = "Right-click to set charging station | Shift+Click for unknown obstacles"
                 color = RED
 
             text_surface = font.render(status_text, True, color)
@@ -188,14 +229,38 @@ class Grid_Map:
 
             pg.display.flip()
 
-        # ✅ FIXED: Always ensure numpy array at the end
+        # Always ensure numpy array at the end
         if not isinstance(self.map, np.ndarray):
             self.map = np.array(self.map, dtype=object)
 
         print(f"✅ Setup complete! Charging station: {self.battery_pos}")
+        print(f"🟣 Unknown obstacles: {len(self.unknown_obstacles)} placed")
 
-        # ✅ FIXED: Return BOTH environment AND updated battery position
+        # Return BOTH environment AND updated battery position
         return copy.deepcopy(self.map.tolist()), self.battery_pos
+
+    def _draw_unknown_obstacles(self):
+        """✅ NEW: Draw unknown obstacles with purple color"""
+        for row, col in self.unknown_obstacles:
+            pg.draw.rect(self.WIN,
+                         PURPLE,
+                         [EPSILON * col + BORDER,
+                          EPSILON * row + BORDER,
+                          EPSILON - BORDER,
+                          EPSILON - BORDER])
+
+    def get_combined_environment(self):
+        """✅ NEW: Get environment với unknown obstacles included"""
+        combined_env = self.map.copy()
+
+        # Add unknown obstacles (value 2) to the environment
+        for row, col in self.unknown_obstacles:
+            if isinstance(combined_env, np.ndarray):
+                combined_env[row, col] = 2
+            else:
+                combined_env[row][col] = 2
+
+        return combined_env
 
     def save_map(self, output_file):
         map = self.map
@@ -210,7 +275,6 @@ class Grid_Map:
             print("Save map done!")
 
     def draw(self):
-        # self.draw_map()
         self.WIN.blit(self.grid_surface, (0, 0))
         pg.draw.rect(self.WIN, (238, 238, 238), self.info_bar)
 
@@ -221,6 +285,9 @@ class Grid_Map:
             self.draw_path(self.charge_path_plan, BROWN)
         elif self.move_status == 3:  # advance
             self.draw_path(self.charge_path_plan, BLUE)
+
+        # ✅ Draw unknown obstacles on top
+        self._draw_unknown_obstacles()
 
         pg.draw.rect(self.WIN, YELLOW, self.battery_img)
 
@@ -239,14 +306,16 @@ class Grid_Map:
             for col in range(len(self.map[0]) if len(self.map) > 0 else 0):
                 color = WHITE
 
-                # ✅ FIXED: Handle both list and numpy array indexing
+                # Handle both list and numpy array indexing
                 if isinstance(self.map, np.ndarray):
                     cell_value = self.map[row, col]
                 else:
                     cell_value = self.map[row][col]
 
-                if cell_value in (1, 'o'):  # dùng chung cho map.txt
+                if cell_value in (1, 'o'):  # Static obstacles
                     color = BLACK
+                elif cell_value == 2:  # ✅ Unknown obstacles
+                    color = PURPLE
                 elif cell_value == '_':
                     color = GREY
                 elif cell_value == 'e':
@@ -295,7 +364,7 @@ class Grid_Map:
             for col in range(len(self.map[0]) if len(self.map) > 0 else 0):
                 color = BLACK
 
-                # ✅ FIXED: Handle both list and numpy array indexing
+                # Handle both list and numpy array indexing
                 if isinstance(self.map, np.ndarray):
                     cell_value = self.map[row, col]
                 else:
@@ -337,28 +406,26 @@ class Grid_Map:
             pg.draw.lines(self.WIN, color, False, point_list, width=2)
 
     def update_battery_pos(self, pos):
-        """✅ FIXED: Update battery position and UI"""
+        """Update battery position and UI"""
         self.battery_pos = pos
         self.battery_img.x = EPSILON * pos[1] + BORDER
         self.battery_img.y = EPSILON * pos[0] + BORDER
-        print(f"🔋 Battery position updated to: {pos}")
 
     def update_vehicle_pos(self, pos):
         self.vehicle_pos = pos
 
-    # ✅ FIXED: Handle both list and numpy array cases (BWave compatible)
     def task(self, pos):
         """
         Mark cell as explored ('e')
         pos: tuple (row, col)
         """
-        row, col = pos  # Unpack tuple
+        row, col = pos
 
         # Handle both list and numpy array cases
         if isinstance(self.map, np.ndarray):
-            self.map[row, col] = 'e'  # Numpy array indexing
+            self.map[row, col] = 'e'
         else:
-            self.map[row][col] = 'e'  # List indexing
+            self.map[row][col] = 'e'
 
         color = GREEN
         pg.draw.rect(self.grid_surface,
@@ -368,7 +435,6 @@ class Grid_Map:
                       EPSILON - BORDER,
                       EPSILON - BORDER])
 
-    # ✅ FIXED: Handle tuple position properly
     def move_to(self, pos):
         """
         Move to position during coverage
@@ -380,7 +446,6 @@ class Grid_Map:
         self.update_vehicle_pos(pos)
         self.trajectories[-1].append(pos)
 
-    # ✅ FIXED: Handle tuple position properly
     def move_retreat(self, pos):
         """
         Move to position during retreat
@@ -391,7 +456,6 @@ class Grid_Map:
         if pos == self.battery_pos:
             self.move_status = 2
 
-    # ✅ FIXED: Handle tuple position properly
     def move_advance(self, pos):
         """
         Move to position during advance

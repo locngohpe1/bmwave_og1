@@ -1,11 +1,6 @@
-"""
-robot.py - ε⋆+ Algorithm Implementation
-100% Paper Compliant - Song & Gupta (2018) + Shen et al. (2020)
-Static Map Knowledge + Dynamic Sensor Discovery
-"""
-
 import math
 import heapq
+import time
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 from .core import Position, EnergyConfig, SegmentType, CellState
@@ -13,21 +8,17 @@ from .etm import ExploratoryTuringMachine
 
 
 class VisibilityGraph:
-    """Visibility graph for A* pathfinding with static map awareness"""
-
     def __init__(self, discovered_environment: Dict[Tuple[int, int], str], etm=None):
         self.discovered_environment = discovered_environment
         self.etm = etm
 
     def neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighbors respecting static walls and discovered obstacles"""
         neighbors = []
         directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
         for dr, dc in directions:
             new_pos = (pos[0] + dr, pos[1] + dc)
 
-            # Bounds check
             if (self.etm and (new_pos[0] < 0 or new_pos[0] >= self.etm.maps.rows or
                              new_pos[1] < 0 or new_pos[1] >= self.etm.maps.cols)):
                 continue
@@ -35,27 +26,22 @@ class VisibilityGraph:
             if new_pos in self.discovered_environment:
                 cell_value = self.discovered_environment[new_pos]
 
-                # Never pass through static walls
                 if cell_value == 'wall':
                     continue
 
-                # Never pass through discovered obstacles
                 if self._is_obstacle_cell(cell_value):
                     continue
 
-                # Check ETM discovered obstacles
                 if (self.etm and
                     Position(new_pos[0], new_pos[1]) in self.etm.discovered_obstacles):
                     continue
 
-                # Allow movement through free space
                 if cell_value in ('u', 'e'):
                     neighbors.append(new_pos)
 
         return neighbors
 
     def _is_obstacle_cell(self, cell_value) -> bool:
-        """Check if cell is any type of obstacle"""
         if isinstance(cell_value, str):
             return cell_value in ('o', 'obstacle', '1', 'wall')
         if isinstance(cell_value, (int, float)):
@@ -63,14 +49,11 @@ class VisibilityGraph:
         return False
 
     def weight(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
-        """Calculate edge weight (Euclidean distance)"""
         return math.sqrt((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2)
 
 
 def a_star_search(graph: VisibilityGraph, start: Tuple[int, int],
                   goal: Tuple[int, int]) -> Tuple[List[Tuple[int, int]], float]:
-    """A* pathfinding algorithm"""
-
     def heuristic(pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
         return math.sqrt((pos1[0] - pos2[0]) ** 2 + (pos1[1] - pos2[1]) ** 2)
 
@@ -101,36 +84,26 @@ def a_star_search(graph: VisibilityGraph, start: Tuple[int, int],
 
 
 class EpsilonStarPlusRobot:
-    """
-    ε⋆+ Algorithm Robot Implementation
-    Based on Song & Gupta (2018) and Shen et al. (2020)
-    """
-
     def __init__(self, battery_pos: Position, rows: int, cols: int,
                  energy_config: EnergyConfig = None, sensor_range: float = 2.0):
 
-        # Sensor configuration per papers
         self.sensor_range = sensor_range
         self.task_range = min(sensor_range, 1.0)
 
-        # Core components
         self.etm = ExploratoryTuringMachine(rows, cols, sensor_range)
         self.energy_config = energy_config or EnergyConfig()
 
-        # Robot state
         self.current_pos = battery_pos
         self.battery_pos = battery_pos
         self.energy = self.energy_config.capacity
         self.current_segment = SegmentType.COVERAGE
 
-        # Map knowledge
         self.static_map = None
         self.rows = rows
         self.cols = cols
         self.discovered_environment = {}
         self.true_environment_array = None
 
-        # Statistics
         self.stats = {
             'total_path_length': 0.0,
             'coverage_length': 0.0,
@@ -141,14 +114,12 @@ class EpsilonStarPlusRobot:
             'sensor_activations': 0
         }
 
-        # UI reference for visualization
         self.ui_reference = None
+        self._prev_discovered_count = 0
 
     def set_static_map(self, static_map_array: np.ndarray):
-        """Set static map knowledge (walls/free space)"""
         self.static_map = static_map_array.copy()
 
-        # Initialize discovered environment with static knowledge
         for row in range(self.rows):
             for col in range(self.cols):
                 if self.static_map[row, col] == 1:
@@ -156,7 +127,6 @@ class EpsilonStarPlusRobot:
                 else:
                     self.discovered_environment[(row, col)] = 'u'
 
-        # Update ETM with static walls
         for row in range(self.rows):
             for col in range(self.cols):
                 if self.static_map[row, col] == 1:
@@ -164,26 +134,28 @@ class EpsilonStarPlusRobot:
         self.etm.maps.update_all_levels()
 
     def set_environment(self, environment_array: np.ndarray):
-        """Set true environment for sensor simulation"""
         self.true_environment_array = environment_array
         self.etm.set_environment_for_simulation(environment_array)
 
     def run_step(self) -> Dict:
-        """Execute one step of ε⋆+ algorithm"""
         if self.etm.is_coverage_complete():
             return {'status': 'complete', 'action': 'none', 'position': self.current_pos.tuple}
 
-        # Get waypoint with sensor discovery
         waypoints = self.etm.get_waypoint(self.current_pos, self.true_environment_array)
         self.stats['sensor_activations'] += 1
 
-        # Sync discovered obstacles
+        newly_discovered = self._check_newly_discovered_obstacles()
+        if newly_discovered:
+            print(f"Sensor detected obstacles: {[pos.tuple for pos in newly_discovered]}")
+            time.sleep(0.3)
+            if self.ui_reference:
+                self.ui_reference.draw()
+
         self._sync_discovered_obstacles()
 
         if not waypoints:
             return {'status': 'no_waypoint', 'action': 'none', 'position': self.current_pos.tuple}
 
-        # Select waypoint
         selected_wp = self._select_waypoint(waypoints)
 
         if self._is_obstacle_position(selected_wp):
@@ -197,8 +169,17 @@ class EpsilonStarPlusRobot:
                 return self._execute_energy_cycle()
             return self._move_to(selected_wp)
 
+    def _check_newly_discovered_obstacles(self) -> List[Position]:
+        current_discovered = len(self.etm.discovered_obstacles)
+        newly_discovered = []
+
+        if current_discovered > self._prev_discovered_count:
+            newly_discovered = list(self.etm.discovered_obstacles)[self._prev_discovered_count:]
+            self._prev_discovered_count = current_discovered
+
+        return newly_discovered
+
     def _sync_discovered_obstacles(self):
-        """Sync ETM discovered obstacles to robot's environment map"""
         for obstacle_pos in self.etm.discovered_obstacles:
             pos_tuple = obstacle_pos.tuple
             if (pos_tuple in self.discovered_environment and
@@ -206,7 +187,6 @@ class EpsilonStarPlusRobot:
                 self.discovered_environment[pos_tuple] = 'o'
 
     def _is_obstacle_position(self, pos: Position) -> bool:
-        """Check if position is obstacle"""
         pos_tuple = pos.tuple
         if pos_tuple not in self.discovered_environment:
             return True
@@ -214,7 +194,6 @@ class EpsilonStarPlusRobot:
         return cell_value in ('wall', 'o', 'obstacle', '1') or cell_value == 1
 
     def _check_energy_constraint(self, next_pos: Position) -> bool:
-        """Check energy constraint per Shen et al. (2020)"""
         try:
             self._sync_discovered_obstacles()
             move_energy = self._calculate_move_energy(next_pos)
@@ -226,7 +205,6 @@ class EpsilonStarPlusRobot:
             return False
 
     def _calculate_return_path(self, from_pos: Position) -> Tuple[List[Position], float]:
-        """Calculate return path to battery using A*"""
         self._sync_discovered_obstacles()
         graph = VisibilityGraph(self.discovered_environment, self.etm)
 
@@ -239,12 +217,10 @@ class EpsilonStarPlusRobot:
             return self._direct_path_fallback(from_pos)
 
     def _direct_path_fallback(self, from_pos: Position) -> Tuple[List[Position], float]:
-        """Emergency fallback path"""
         direct_dist = from_pos.distance_to(self.battery_pos)
         return [from_pos, self.battery_pos], direct_dist
 
     def _calculate_move_energy(self, to_pos: Position) -> float:
-        """Calculate movement energy based on segment type"""
         distance = self.current_pos.distance_to(to_pos)
         if self.current_segment == SegmentType.COVERAGE:
             return self.energy_config.coverage_rate * distance
@@ -255,11 +231,9 @@ class EpsilonStarPlusRobot:
         return distance
 
     def _calculate_retreat_energy(self, distance: float) -> float:
-        """Calculate retreat energy"""
         return self.energy_config.retreat_rate * distance
 
     def _execute_energy_cycle(self) -> Dict:
-        """Execute retreat-charge-advance cycle"""
         self.stats['return_count'] += 1
         retreat_info = self._execute_retreat()
         self._execute_charge()
@@ -273,26 +247,21 @@ class EpsilonStarPlusRobot:
         }
 
     def _execute_retreat(self) -> Dict:
-        """Execute retreat to battery"""
         self.current_segment = SegmentType.RETREAT
 
         try:
             retreat_path, distance = self._calculate_return_path(self.current_pos)
 
-            # Set UI visualization
             if self.ui_reference:
                 retreat_path_tuples = [(pos.row, pos.col) for pos in retreat_path]
                 self.ui_reference.set_charge_path(retreat_path_tuples)
 
-            # Verify path ends at battery
             if retreat_path[-1].tuple != self.battery_pos.tuple:
                 retreat_path[-1] = self.battery_pos
 
-            # Execute retreat moves
             for next_pos in retreat_path[1:]:
                 self._move_to(next_pos)
 
-            # Verify robot reached battery
             if self.current_pos.tuple != self.battery_pos.tuple:
                 self.current_pos = self.battery_pos
 
@@ -303,11 +272,9 @@ class EpsilonStarPlusRobot:
             return {'success': False, 'error': str(e)}
 
     def _execute_charge(self):
-        """Recharge at battery station"""
         self.energy = self.energy_config.capacity
 
     def _execute_advance(self) -> Dict:
-        """Execute advance from battery"""
         self.current_segment = SegmentType.ADVANCE
         target = self._find_advance_target()
 
@@ -319,7 +286,6 @@ class EpsilonStarPlusRobot:
             advance_path, distance = self._calculate_return_path(target)
             advance_path = list(reversed(advance_path))
 
-            # Set UI visualization
             if self.ui_reference:
                 advance_path_tuples = [(pos.row, pos.col) for pos in advance_path]
                 self.ui_reference.set_charge_path(advance_path_tuples)
@@ -335,7 +301,6 @@ class EpsilonStarPlusRobot:
             return {'success': False, 'error': str(e)}
 
     def _find_advance_target(self) -> Optional[Position]:
-        """Find advance target using ETM guidance"""
         etm_waypoints = self.etm.get_waypoint(self.battery_pos, self.true_environment_array)
 
         if etm_waypoints:
@@ -348,7 +313,6 @@ class EpsilonStarPlusRobot:
         return self._nearest_unexplored_cell()
 
     def _nearest_unexplored_cell(self) -> Optional[Position]:
-        """Find nearest unexplored cell"""
         max_radius = min(10, max(self.etm.maps.rows, self.etm.maps.cols) // 4)
 
         for radius in range(1, max_radius):
@@ -368,7 +332,6 @@ class EpsilonStarPlusRobot:
         return None
 
     def _select_waypoint(self, waypoints: List[Position]) -> Position:
-        """Select best waypoint from candidates"""
         if len(waypoints) == 1:
             return waypoints[0]
 
@@ -379,17 +342,14 @@ class EpsilonStarPlusRobot:
         return min(valid_waypoints, key=lambda wp: self.current_pos.distance_to(wp))
 
     def _move_to(self, new_pos: Position) -> Dict:
-        """Move robot to new position"""
         if self._is_obstacle_position(new_pos):
             return {'status': 'blocked', 'action': 'blocked_move', 'position': self.current_pos.tuple}
 
-        # Calculate and consume energy
         energy_cost = self._calculate_move_energy(new_pos)
         if self.energy < energy_cost:
             raise Exception("Robot ran out of energy!")
         self.energy -= energy_cost
 
-        # Update statistics
         distance = self.current_pos.distance_to(new_pos)
         self.stats['total_path_length'] += distance
 
@@ -400,16 +360,13 @@ class EpsilonStarPlusRobot:
         elif self.current_segment == SegmentType.ADVANCE:
             self.stats['advance_length'] += distance
 
-        # Update position
         self.current_pos = new_pos
 
-        # Update discovered environment
         pos_tuple = new_pos.tuple
         if (pos_tuple in self.discovered_environment and
             self.discovered_environment[pos_tuple] not in ('wall', 'o')):
             self.discovered_environment[pos_tuple] = 'e'
 
-        # UI integration
         if self.ui_reference:
             if self.current_segment == SegmentType.COVERAGE:
                 self.ui_reference.move_to(pos_tuple)
@@ -429,22 +386,18 @@ class EpsilonStarPlusRobot:
         }
 
     def _perform_task(self) -> Dict:
-        """Perform coverage task at current position"""
         distance_to_task = 0.0
 
         if distance_to_task <= self.task_range:
             self.stats['task_count'] += 1
 
-            # Update ETM
             self.etm.task_completed(self.current_pos)
 
-            # Update discovered environment
             pos_tuple = self.current_pos.tuple
             if (pos_tuple in self.discovered_environment and
                 self.discovered_environment[pos_tuple] not in ('wall', 'o')):
                 self.discovered_environment[pos_tuple] = 'e'
 
-            # UI integration
             if self.ui_reference:
                 self.ui_reference.task(pos_tuple)
 
@@ -461,10 +414,8 @@ class EpsilonStarPlusRobot:
             }
 
     def get_statistics(self) -> Dict:
-        """Get comprehensive algorithm statistics"""
         stats = self.stats.copy()
 
-        # Calculate coverage metrics
         known_free_cells = sum(1 for state in self.discovered_environment.values()
                               if state in ['e', 'u'])
         explored_cells = sum(1 for state in self.discovered_environment.values()
@@ -480,12 +431,10 @@ class EpsilonStarPlusRobot:
         stats['coverage_percentage'] = (
             explored_cells / known_free_cells * 100) if known_free_cells > 0 else 0
 
-        # Add sensor statistics
         etm_sensor_stats = self.etm.get_sensor_statistics()
         stats.update(etm_sensor_stats)
 
         return stats
 
     def is_complete(self) -> bool:
-        """Check if coverage is complete"""
         return self.etm.is_coverage_complete()

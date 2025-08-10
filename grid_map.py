@@ -18,7 +18,7 @@ LIGHT_ORANGE = (255, 140, 0)
 PURPLE = (128, 0, 128)
 
 # epsilon value (size of cell)
-EPSILON = 8
+EPSILON = 30
 
 BORDER = 1
 INFO_BAR_HEIGHT = 30
@@ -291,9 +291,6 @@ class Grid_Map:
     
     def update_vehicle_pos(self, pos):
         self.vehicle_pos = pos
-        # self.vehicle_img.x = EPSILON * pos[1] + BORDER
-        # self.vehicle_img.y = EPSILON * pos[0] + BORDER
-
     def task(self, pos):
         self.map[pos] = 'e'
 

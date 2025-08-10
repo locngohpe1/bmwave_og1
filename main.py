@@ -11,10 +11,10 @@ from grid_map import Grid_Map
 
 # coverage:             1 unit of energy / cell width
 # advance & retreat:    0.5 unit of energy / cell width
-ENERGY_CAPACITY = 1000
+ENERGY_CAPACITY = 100
 
 ui = Grid_Map()
-ui.read_map('map/experiment/scenario1/map_1.txt')
+ui.read_map('epsilonstarplus/map/experiment/map_qlearning/mapqlearning_003.txt')
 ENVIRONMENT, battery_pos = ui.edit_map()
 
 ROW_COUNT = len(ENVIRONMENT)
@@ -140,7 +140,6 @@ class Robot:
                     neighbor not in self.dynamic_obstacles):
                 return neighbor
 
-        # BWave deadlock handling will take over
         return current_pos
 
     def run(self):
