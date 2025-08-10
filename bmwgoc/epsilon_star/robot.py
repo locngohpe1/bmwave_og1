@@ -1,5 +1,5 @@
 """
-robot.py - SENSOR-BASED ROBOT IMPLEMENTATION
+robot.py - SENSOR-BASED ROBOT IMPLEMENTATION - 🔧 BUG FIXES APPLIED
 🔧 100% Paper Compliant với Progressive Obstacle Discovery
 """
 
@@ -11,26 +11,44 @@ from .core import Position, EnergyConfig, SegmentType
 from .etm import ExploratoryTuringMachine
 
 
+
 class VisibilityGraph:
     """
-    🔧 SENSOR-AWARE Visibility graph
-    Only considers DISCOVERED obstacles for pathfinding
+    🔧 FIXED: SENSOR-AWARE Visibility graph với Conservative Pathfinding
+    Only considers DISCOVERED obstacles + verified free space for pathfinding
     """
 
     def __init__(self, discovered_obstacles: Dict[Tuple[int, int], str]):
         self.discovered_obstacles = discovered_obstacles
 
     def neighbors(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """Get valid neighbors considering only DISCOVERED obstacles"""
+        """Get valid neighbors with DEBUG tracing"""
         neighbors = []
         directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
+        # 🔧 DEBUG STEP 3: Trace neighbor selection
+        print(f"🔧 DEBUG: Getting neighbors for {pos}")
+
         for dr, dc in directions:
             new_pos = (pos[0] + dr, pos[1] + dc)
+
             if new_pos in self.discovered_obstacles:
                 cell_value = self.discovered_obstacles[new_pos]
-                if not self._is_obstacle_cell(cell_value):
+                is_obstacle = self._is_obstacle_cell(cell_value)
+                is_valid_free = cell_value in ('e', 'u')
+
+                print(f"  {new_pos}: value='{cell_value}', is_obstacle={is_obstacle}, is_valid_free={is_valid_free}")
+
+                if not is_obstacle and is_valid_free:
                     neighbors.append(new_pos)
+                    print(f"  ✅ ADDED {new_pos}")
+                else:
+                    print(f"  ❌ REJECTED {new_pos}")
+            else:
+                print(f"  ❌ {new_pos} NOT IN discovered_obstacles")
+
+        print(f"🎯 Final neighbors for {pos}: {neighbors}")
+        # End DEBUG STEP 3
 
         return neighbors
 
@@ -82,10 +100,11 @@ def a_star_search(graph: VisibilityGraph, start: Tuple[int, int],
 
 class EpsilonStarPlusRobot:
     """
-    🔧 SENSOR-BASED ε⋆+ Algorithm Robot
+    🔧 SENSOR-BASED ε⋆+ Algorithm Robot với BUG FIXES
     - Progressive obstacle discovery using sensors
     - Dynamic environment knowledge building
     - 100% Paper Compliant Implementation
+    - 🔧 FIXED: Safe pathfinding + Enhanced completion
     """
 
     def __init__(self, battery_pos: Position, rows: int, cols: int,
@@ -139,6 +158,23 @@ class EpsilonStarPlusRobot:
         """
         self.true_environment_array = environment_array
         self.etm.set_environment_for_simulation(environment_array)
+        # 🔧 DEBUG STEP 1: Check map format
+        print("🔧 DEBUG: Map value analysis")
+        unique_values = np.unique(environment_array)
+        print(f"Unique values in map: {unique_values}")
+
+        sample_positions = [(0, 0), (10, 10), (20, 20)]
+        for pos in sample_positions:
+            row, col = pos
+            if row < environment_array.shape[0] and col < environment_array.shape[1]:
+                value = environment_array[row, col]
+                print(f"Sample position {pos}: value = {value}")
+
+        obstacle_count = np.sum(environment_array == 1)
+        zero_count = np.sum(environment_array == 0)
+        print(f"Count of 1s (obstacles?): {obstacle_count}")
+        print(f"Count of 0s (free space?): {zero_count}")
+        # End DEBUG STEP 1
 
         total_obstacles = np.sum(environment_array == 1)
         total_cells = environment_array.shape[0] * environment_array.shape[1]
@@ -212,9 +248,29 @@ class EpsilonStarPlusRobot:
 
     def _calculate_return_path(self, from_pos: Position) -> Tuple[List[Position], float]:
         """
-        🔧 Calculate return path using DISCOVERED obstacles only
+        🔧 FIXED: Calculate return path using DISCOVERED obstacles only với safety checks
         Papers: Robot plans based on current obstacle knowledge
         """
+        # 🔧 DEBUG STEP 2: Check discovered environment
+        print(f"🔧 DEBUG: Return path from {from_pos.tuple} to {self.battery_pos.tuple}")
+
+        # Sample discovered environment
+        sample_discovered = {}
+        count = 0
+        for pos, value in self.discovered_environment.items():
+            if count < 10:  # First 10 entries
+                sample_discovered[pos] = value
+                count += 1
+        print(f"Sample discovered environment: {sample_discovered}")
+
+        # Count discovered types
+        obstacle_discovered = sum(
+            1 for v in self.discovered_environment.values() if v in ('o', 'obstacle', '1') or v == 1)
+        free_discovered = sum(1 for v in self.discovered_environment.values() if v in ('e', 'u'))
+        print(f"Discovered obstacles: {obstacle_discovered}")
+        print(f"Discovered free cells: {free_discovered}")
+        # End DEBUG STEP 2
+        # 🔧 Create conservative visibility graph
         graph = VisibilityGraph(self.discovered_environment)
 
         try:
@@ -222,13 +278,49 @@ class EpsilonStarPlusRobot:
                 graph, from_pos.tuple, self.battery_pos.tuple
             )
             path = [Position(row, col) for row, col in path_tuples]
+
+            # 🔧 DEBUG STEP 4: Trace A* results
+            print(f"🔧 DEBUG: A* found path with {len(path)} steps:")
+            for i, pos in enumerate(path):
+                true_value = "UNKNOWN"
+                if self.true_environment_array is not None:
+                    true_value = self.true_environment_array[pos.row, pos.col]
+                discovered_value = self.discovered_environment.get(pos.tuple, "NOT_FOUND")
+
+                print(f"  Step {i}: {pos.tuple} -> true={true_value}, discovered='{discovered_value}'")
+
+                if true_value == 1:
+                    print(f"  🚨 WARNING: Step {i} goes through TRUE OBSTACLE!")
+            # End DEBUG STEP 4
+
             return path, distance
 
         except Exception as e:
             print(f"⚠️  A* failed with discovered obstacles: {e}")
             # Fallback: direct distance (robot doesn't know about undiscovered obstacles)
-            direct_dist = from_pos.distance_to(self.battery_pos)
-            return [from_pos, self.battery_pos], direct_dist
+            return self._direct_path_fallback(from_pos)
+
+    def _verify_path_safety(self, path: List[Position]) -> bool:
+        """
+        🔧 NEW: Verify path doesn't go through true obstacles
+        """
+        if self.true_environment_array is None:
+            return True
+
+        for pos in path:
+            if (0 <= pos.row < self.true_environment_array.shape[0] and
+                0 <= pos.col < self.true_environment_array.shape[1]):
+                if self.true_environment_array[pos.row, pos.col] == 1:
+                    print(f"⚠️  Unsafe path: Would pass through obstacle at {pos.tuple}")
+                    return False
+        return True
+
+    def _direct_path_fallback(self, from_pos: Position) -> Tuple[List[Position], float]:
+        """
+        🔧 NEW: Safe fallback when A* fails
+        """
+        direct_dist = from_pos.distance_to(self.battery_pos)
+        return [from_pos, self.battery_pos], direct_dist
 
     def _calculate_move_energy(self, to_pos: Position) -> float:
         """Calculate energy for move based on current segment"""

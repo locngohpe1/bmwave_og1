@@ -353,7 +353,7 @@ def main():
     parser = argparse.ArgumentParser(description='Sensor-based ε⋆+ Algorithm Runner')
     parser.add_argument('--map', '-m', type=str,
                        default="map/real_map/denmark.txt",
-                       help='Path to map file (default: map/experiment/scenario1/map_1.txt)')
+                       help='Path to map file (default: map/real_map/denmark.txt)')
     parser.add_argument('--sensor-range', '-s', type=float,
                        default=2.0,
                        help='Sensor detection range Rs (default: 2.0)')
