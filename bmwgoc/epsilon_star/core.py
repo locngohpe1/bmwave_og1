@@ -1,8 +1,3 @@
-"""
-epsilon_star/core.py
-Core classes và data structures cho ε⋆+ Algorithm
-"""
-
 import numpy as np
 import math
 from enum import Enum
@@ -11,7 +6,7 @@ from typing import List, Tuple, Optional
 
 
 class ETMState(Enum):
-    """ETM States theo Definition 3.1"""
+    """ETM States per Definition 3.1"""
     ST = "START"
     CP0 = "COMPUTE_L0"
     CP1 = "COMPUTE_L1"
@@ -21,7 +16,7 @@ class ETMState(Enum):
 
 
 class CellState(Enum):
-    """Symbolic states cho ε-cells"""
+    """Symbolic states for ε-cells"""
     O = "OBSTACLE"
     F = "FORBIDDEN"
     E = "EXPLORED"
@@ -37,7 +32,7 @@ class SegmentType(Enum):
 
 @dataclass
 class Position:
-    """Position với helper methods"""
+    """Position with utility methods"""
     row: int
     col: int
 
@@ -61,43 +56,34 @@ class Position:
 
 @dataclass
 class EnergyConfig:
-    """Energy configuration theo paper"""
+    """Energy configuration per Shen et al. (2020)"""
     capacity: float = 1000.0
-    coverage_rate: float = 2.0  # "twice this amount for coverage segment"
-    advance_rate: float = 1.0  # "proportional to trajectory length"
+    coverage_rate: float = 2.0
+    advance_rate: float = 1.0
     retreat_rate: float = 1.0
 
 
 class MAPSHierarchy:
     """
     Multiscale Adaptive Potential Surfaces
-    Implementation theo Section 3-A từ paper
+    Implementation per Section 3-A
     """
 
     def __init__(self, rows: int, cols: int):
         self.rows = rows
         self.cols = cols
-
-        # Build hierarchical tiling
         self.tilings = self._build_hierarchical_tiling()
         self.max_level = len(self.tilings) - 1
-
-        # Potential surfaces for each level
         self.potential_surfaces = [np.zeros(shape) for shape in self.tilings]
-
-        # Exogenous potential field B
         self.field_B = self._create_field_B()
-
-        # Symbolic states (Level 0 only)
         self.states = np.full((rows, cols), CellState.U, dtype=object)
 
     def _build_hierarchical_tiling(self) -> List[Tuple[int, int]]:
-        """Build MST theo recursive decomposition"""
+        """Build MST per recursive decomposition"""
         tilings = [(self.rows, self.cols)]
         current_rows, current_cols = self.rows, self.cols
 
         while True:
-            # Divide rows
             if current_rows % 2 == 0:
                 new_rows = current_rows // 2
             else:
@@ -106,7 +92,6 @@ class MAPSHierarchy:
                     break
                 new_rows = n_prime
 
-            # Divide cols
             if current_cols % 2 == 0:
                 new_cols = current_cols // 2
             else:
@@ -130,12 +115,12 @@ class MAPSHierarchy:
 
         for row in range(self.rows):
             for col in range(self.cols):
-                B[row, col] = B_max - col  # Decreasing left to right
+                B[row, col] = B_max - col
 
         return B
 
     def update_level_0(self):
-        """Update potential surface Level 0 theo Equation (2)"""
+        """Update potential surface Level 0 per Equation (2)"""
         E0 = self.potential_surfaces[0]
 
         for row in range(self.rows):
@@ -150,7 +135,7 @@ class MAPSHierarchy:
                     E0[row, col] = self.field_B[row, col]
 
     def update_level_l(self, level: int):
-        """Update potential surface Level l theo Equation (3)"""
+        """Update potential surface Level l per Equation (3)"""
         if level == 0:
             self.update_level_0()
             return
@@ -171,18 +156,13 @@ class MAPSHierarchy:
                     El[coarse_row, coarse_col] = 0
                     continue
 
-                # Calculate p^U_αℓ
                 total_cells = len(epsilon_cells)
                 unexplored_count = sum(
                     1 for pos in epsilon_cells
                     if self.states[pos.row, pos.col] == CellState.U
                 )
                 p_U = unexplored_count / total_cells if total_cells > 0 else 0
-
-                # Calculate mean B_αℓ
                 B_mean = np.mean([self.field_B[pos.row, pos.col] for pos in epsilon_cells])
-
-                # Apply Equation (3)
                 El[coarse_row, coarse_col] = p_U * B_mean
 
     def _get_epsilon_cells_in_coarse_cell(self, coarse_row: int, coarse_col: int,
@@ -242,7 +222,6 @@ class MAPSHierarchy:
             coarse_pos.row, coarse_pos.col, level
         )
 
-        # Filter unexplored cells
         unexplored_cells = [
             pos for pos in epsilon_cells
             if self.states[pos.row, pos.col] == CellState.U
