@@ -63,6 +63,8 @@ class EpsilonStarPlusRunner:
 
         print(f"✅ Interactive setup complete!")
         print(f"🔋 Charging station: {self.battery_pos.tuple}")
+        print(f"🔧 DEBUG: UI battery_pos = {final_battery_pos}")
+        print(f"🔧 DEBUG: Runner battery_pos = {self.battery_pos.tuple}")
 
         # 🔧 SENSOR CONFIGURATION per papers
         self.sensor_range = sensor_range
@@ -83,6 +85,18 @@ class EpsilonStarPlusRunner:
             self.energy_config,
             sensor_range=self.sensor_range
         )
+
+        # 🔧 CRITICAL: Verify robot battery position matches UI
+        print(f"🔧 DEBUG: Robot initialized with battery_pos = {self.robot.battery_pos.tuple}")
+        print(f"🔧 DEBUG: Robot current_pos = {self.robot.current_pos.tuple}")
+
+        # 🔧 VERIFICATION: Ensure positions match
+        if self.robot.battery_pos.tuple != self.battery_pos.tuple:
+            print(f"🚨 ERROR: Battery position mismatch!")
+            print(f"  UI battery_pos: {self.battery_pos.tuple}")
+            print(f"  Robot battery_pos: {self.robot.battery_pos.tuple}")
+        else:
+            print(f"✅ Battery position synchronized correctly")
 
         # 🔧 Set TRUE environment for sensor simulation (robot doesn't know this)
         self.robot.set_environment(self.true_environment_array)

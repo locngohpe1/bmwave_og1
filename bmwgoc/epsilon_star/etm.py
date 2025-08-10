@@ -34,7 +34,7 @@ class ExploratoryTuringMachine:
 
         # 🔧 ENHANCED COMPLETION TRACKING
         self.global_exploration_attempts = 0
-        self.max_global_attempts = 3
+        self.max_global_attempts = 5  # Increased from 3 to 5
         self.exploration_radius_expansion = 0
 
         # 🔧 UNKNOWN ENVIRONMENT - Initially all unexplored
@@ -236,13 +236,24 @@ class ExploratoryTuringMachine:
 
     def _try_global_exploration_before_finish(self, current_pos: Position) -> List[Position]:
         """
-        🔧 NEW: Try global exploration before declaring completion
-        Paper compliant: Uses sensor expansion within reasonable limits
-        Papers don't specify exploration strategy details - this is enhancement
+        🔧 ENHANCED: More aggressive global exploration before declaring completion
+        Papers allow flexible sensor usage for thorough coverage
         """
         if self.global_exploration_attempts >= self.max_global_attempts:
+            # 🔧 FINAL VERIFICATION: Check if there are truly no reachable unexplored areas
+            final_check = self._comprehensive_area_scan(current_pos)
+            if final_check:
+                print(f"🎯 Found reachable area in final check: {final_check.tuple}")
+                self.current_wp = [final_check]
+                self.state = ETMState.CP0
+                # Reset attempts for continued exploration
+                self.global_exploration_attempts = 0
+                self.exploration_radius_expansion = 0
+                return self.current_wp
+
             print(f"🏁 ETM: Global exploration exhausted after {self.max_global_attempts} attempts")
             print(f"📊 Discovered obstacles: {len(self.discovered_obstacles)}")
+            print(f"🔍 Final comprehensive scan found no reachable areas")
             print(f"🎯 Declaring coverage completion")
             self.state = ETMState.FN
             return []
@@ -250,14 +261,23 @@ class ExploratoryTuringMachine:
         self.global_exploration_attempts += 1
         self.exploration_radius_expansion += 1
 
-        # 🔧 EXPAND SENSOR RANGE for exploration (paper allows sensor configuration)
-        expanded_range = self.sensor_range + (self.exploration_radius_expansion * 2.0)
+        # 🔧 PROGRESSIVE SEARCH STRATEGY
+        base_range = self.sensor_range * 2  # Start with 2x sensor range
+        expanded_range = base_range + (self.exploration_radius_expansion * 3.0)  # More aggressive expansion
 
         print(f"🌍 ETM: Global exploration attempt #{self.global_exploration_attempts}")
         print(f"📡 Expanding search range to {expanded_range} for distant area detection")
 
-        # Try to find distant unexplored areas
+        # Try multiple search strategies
         distant_target = self._find_distant_unexplored_area(current_pos, expanded_range)
+
+        if not distant_target:
+            # Try alternative search patterns
+            distant_target = self._spiral_search_unexplored(current_pos, expanded_range)
+
+        if not distant_target:
+            # Try edge-based search
+            distant_target = self._edge_based_search(current_pos)
 
         if distant_target:
             print(f"🎯 Found distant unexplored area at {distant_target.tuple}")
@@ -301,6 +321,115 @@ class ExploratoryTuringMachine:
                             return target
 
         return None
+
+    def _comprehensive_area_scan(self, current_pos: Position) -> Optional[Position]:
+        """
+        🔧 NEW: Comprehensive final scan for any remaining unexplored reachable areas
+        """
+        print("🔍 ETM: Performing comprehensive final area scan...")
+
+        # Scan entire map systematically
+        for row in range(self.maps.rows):
+            for col in range(self.maps.cols):
+                candidate = Position(row, col)
+
+                # Check if cell is unexplored and potentially reachable
+                if (self.maps.states[row, col] == CellState.U and
+                    not self._is_obstacle(candidate)):
+
+                    # Check if there's a potential path (rough estimation)
+                    if self._is_potentially_reachable(current_pos, candidate):
+                        print(f"🎯 Final scan found potentially reachable area: {candidate.tuple}")
+                        return candidate
+
+        print("🔍 Comprehensive scan completed - no reachable areas found")
+        return None
+
+    def _spiral_search_unexplored(self, current_pos: Position, max_range: float) -> Optional[Position]:
+        """
+        🔧 NEW: Spiral search pattern for unexplored areas
+        """
+        max_radius = min(int(max_range), max(self.maps.rows, self.maps.cols) // 2)
+
+        for radius in range(1, max_radius + 1):
+            # Search in spiral pattern
+            for dr in range(-radius, radius + 1):
+                for dc in range(-radius, radius + 1):
+                    # Only check cells at current radius distance
+                    if abs(dr) + abs(dc) == radius or max(abs(dr), abs(dc)) == radius:
+                        target = Position(
+                            current_pos.row + dr,
+                            current_pos.col + dc
+                        )
+
+                        if (self.maps._is_valid_position(target, 0) and
+                            self.maps.states[target.row, target.col] == CellState.U and
+                            not self._is_obstacle(target)):
+
+                            distance = current_pos.distance_to(target)
+                            if distance <= max_range:
+                                return target
+
+        return None
+
+    def _edge_based_search(self, current_pos: Position) -> Optional[Position]:
+        """
+        🔧 NEW: Search along map edges for unexplored areas
+        """
+        # Check map boundaries for unexplored cells
+        edge_candidates = []
+
+        # Top and bottom edges
+        for col in range(self.maps.cols):
+            for row in [0, self.maps.rows - 1]:
+                if row >= 0 and row < self.maps.rows:
+                    candidate = Position(row, col)
+                    if (self.maps.states[row, col] == CellState.U and
+                        not self._is_obstacle(candidate)):
+                        edge_candidates.append(candidate)
+
+        # Left and right edges
+        for row in range(self.maps.rows):
+            for col in [0, self.maps.cols - 1]:
+                if col >= 0 and col < self.maps.cols:
+                    candidate = Position(row, col)
+                    if (self.maps.states[row, col] == CellState.U and
+                        not self._is_obstacle(candidate)):
+                        edge_candidates.append(candidate)
+
+        # Return nearest edge candidate
+        if edge_candidates:
+            return min(edge_candidates, key=lambda pos: current_pos.distance_to(pos))
+
+        return None
+
+    def _is_potentially_reachable(self, from_pos: Position, to_pos: Position) -> bool:
+        """
+        🔧 NEW: Rough estimation if target is potentially reachable
+        """
+        # Simple line-of-sight check (not perfect but helps filter)
+        distance = from_pos.distance_to(to_pos)
+
+        # If too far, likely not reachable
+        if distance > max(self.maps.rows, self.maps.cols):
+            return False
+
+        # Check if there's a rough path (simplified)
+        dr = (to_pos.row - from_pos.row) / max(1, distance)
+        dc = (to_pos.col - from_pos.col) / max(1, distance)
+
+        # Sample a few points along the line
+        samples = min(10, int(distance))
+        for i in range(1, samples):
+            sample_row = int(from_pos.row + dr * i)
+            sample_col = int(from_pos.col + dc * i)
+
+            if (0 <= sample_row < self.maps.rows and
+                0 <= sample_col < self.maps.cols):
+                if self.maps.states[sample_row, sample_col] == CellState.O:
+                    return False  # Blocked by known obstacle
+
+        return True
 
     def _handle_wait_state(self, current_pos: Position) -> List[Position]:
         """WT State: Wait for task completion"""
